@@ -387,12 +387,10 @@ public class Map extends Parent {
 			MapContent content = new MapContent();
             content.addLayer(new WMSLayer(wms, displayLayer));
             MapViewport viewport = content.getViewport();			
-            viewport.setScreenArea(new Rectangle(dimensionX, dimensionY));
-			//viewport.setBounds(new ReferencedEnvelope(getBoundsAsEnvelope()));
-			try{
-				viewport.setCoordinateReferenceSystem(CRS.decode("EPSG:4326"));
-			}
-			catch(Exception e){System.out.println(e);}
+			viewport.setCoordinateReferenceSystem(crs);
+            viewport.setScreenArea(new Rectangle(dimensionX, dimensionY));			
+			viewport.setBounds(getBoundsForViewport());			
+			System.out.println(viewport.getBounds());
 			content.setViewport(viewport);
             screenToWorld = content.getViewport().getScreenToWorld();
             worldToScreen = content.getViewport().getWorldToScreen();
@@ -403,7 +401,8 @@ public class Map extends Parent {
 			Point2D.Double d = transformWorldToScreen(new Point2D.Double(48.86577105570864, 9.122956112634665));
 			System.out.println("48.86577105570864, 9.122956112634665");
 			System.out.println(d);
-			drawMarker(d.getX(), d.getY());		
+			drawMarker(d.getX(), d.getY());
+			content.dispose();			
 			
         } catch (IOException | ServiceException e) {
             log.log(Level.SEVERE, e.getMessage(), e);
@@ -434,8 +433,23 @@ public class Map extends Parent {
 			new GeneralDirectPosition(lowerLeftX, lowerLeftY),
 			new GeneralDirectPosition(upperRightX, upperRightY)
 		);
+		bBox.setCoordinateReferenceSystem(crs);
         return bBox;
     }
+	
+	public ReferencedEnvelope getBoundsForViewport(){
+		List<String> bBoxStrList = Arrays.asList(this.outerBBOX.split(","));
+		System.out.println(bBoxStrList);
+        double upperRightX = Double.parseDouble(bBoxStrList.get(THREE));
+        double upperRightY = Double.parseDouble(bBoxStrList.get(TWO));
+        double lowerLeftX = Double.parseDouble(bBoxStrList.get(ONE));
+        double lowerLeftY = Double.parseDouble(bBoxStrList.get(ZERO));
+        ReferencedEnvelope bBox = new ReferencedEnvelope(			
+			lowerLeftY, upperRightY,
+			lowerLeftX, upperRightX,
+			crs);
+        return bBox;
+	}
 
     /**
      * gets the spacial reference system.
