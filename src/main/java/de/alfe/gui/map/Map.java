@@ -128,7 +128,7 @@ public class Map extends Parent {
     private double previousMouseYPosOnClick;
 
     private static final double DRAGGING_OFFSET = 4;
-    private static final double ZOOM_FACTOR = 100d;
+    private static final double ZOOM_FACTOR = 0.1d;
     private static final double HUNDRED = 100d;
 
     private static final double INITIAL_EXTEND_X1 = 850028;
@@ -137,7 +137,7 @@ public class Map extends Parent {
     private static final double INITIAL_EXTEND_Y2 = 5977713;
 
 
-    private static final double TEN_PERCENT_OF = 0.1d;
+    private static final double TEN_PERCENT_OF = 0.01d;
 
     private static String WPSG_WGS84 = "EPSG:4326";
 
@@ -145,6 +145,8 @@ public class Map extends Parent {
     private AffineTransform screenToWorld;
     private AffineTransform worldToScreen;
 	private CoordinateReferenceSystem crs;
+	
+	private double aspectXY;
 	
     /**
      * gets the children of this node.
@@ -367,20 +369,23 @@ public class Map extends Parent {
             this.iw.setImage(im);
             this.ig.getChildren().add(this.iw);			
 			
-            double mapWidth = layerBBox.getUpperCorner().getOrdinate(0)
+            double lonWidth = layerBBox.getUpperCorner().getOrdinate(0)
                 - layerBBox.getLowerCorner().getOrdinate(0);
-            double mapHeight = layerBBox.getUpperCorner().getOrdinate(1)
+            double latHeight = layerBBox.getUpperCorner().getOrdinate(1)
                 - layerBBox.getLowerCorner().getOrdinate(1);
+			this.aspectXY = lonWidth/latHeight;
+			System.out.println("Map width/height: " + lonWidth + "/" + latHeight + " - " + aspectXY);
+			
 
             double imageCenterX = 0.5 * this.dimensionX;
             double imageCenterY = 0.5 * this.dimensionY;
-            double mapCenterX = layerBBox.getLowerCorner().getOrdinate(0)
-                    + 0.5 * mapWidth;
-            double mapCenterY = layerBBox.getLowerCorner().getOrdinate(1)
-                    + 0.5 * mapHeight;
+            double mapCenterLon = layerBBox.getLowerCorner().getOrdinate(0)
+                    + 0.5 * lonWidth;
+            double mapCenterLat = layerBBox.getLowerCorner().getOrdinate(1)
+                    + 0.5 * latHeight;
             
-			System.out.println("Center XY Image, Map: " + imageCenterX + " - " + imageCenterY + " , " + mapCenterX + " - " + mapCenterY);
-			System.out.println("Width XY Image, Map " + dimensionX + " - " + dimensionY + " , " + mapWidth + " - " + mapHeight);
+			System.out.println("Center XY Image, Map: " + imageCenterX + " - " + imageCenterY + " , " + mapCenterLon + " - " + mapCenterLat);
+			System.out.println("Width XY Image, Map " + dimensionX + " - " + dimensionY + " , " + lonWidth + " - " + latHeight);
 			System.out.println("BBox: " + this.outerBBOX);
 			
             
@@ -395,13 +400,14 @@ public class Map extends Parent {
             screenToWorld = content.getViewport().getScreenToWorld();
             worldToScreen = content.getViewport().getWorldToScreen();
 			
-            Point2D.Double center = new Point2D.Double(mapCenterX, mapCenterY);
+            Point2D.Double center = new Point2D.Double(lonWidth, latHeight);
 			System.out.println("Point world, screen");
 			
+			/*
 			Point2D.Double d = transformWorldToScreen(new Point2D.Double(48.86577105570864, 9.122956112634665));
 			System.out.println("48.86577105570864, 9.122956112634665");
 			System.out.println(d);
-			drawMarker(d.getX(), d.getY());
+			drawMarker(d.getX(), d.getY());*/
 			content.dispose();			
 			
         } catch (IOException | ServiceException e) {
@@ -437,6 +443,10 @@ public class Map extends Parent {
         return bBox;
     }
 	
+	/**
+     * Returns bounding box as ReferencedEnvelope with coordinate order: xMin, xMax, yMin, yMax
+     * @return the Bounding Box
+     */
 	public ReferencedEnvelope getBoundsForViewport(){
 		List<String> bBoxStrList = Arrays.asList(this.outerBBOX.split(","));
 		System.out.println(bBoxStrList);
@@ -476,28 +486,31 @@ public class Map extends Parent {
 	}
 
 
-    private void zoomIn() {
-       /* System.out.println("Zoom In");
-        Envelope bBox = getBoundsAsEnvelope();
-        double median = bBox.getMaxX() + bBox.getMaxY() + bBox.getMinX() + bBox.getMinY();
-        median = median / 4;
-        String bBoxStr
-                = (bBox.getMaxX() - (ZOOM_FACTOR)) + "," + (bBox.getMaxY() - (ZOOM_FACTOR))+ ","
-                + (bBox.getMinX() - (ZOOM_FACTOR)) + "," + (bBox.getMinY() - (ZOOM_FACTOR));
-        setMapImage(bBoxStr, INIT_SPACIAL_REF_SYS, INIT_LAYER_NUMBER);*/
+    private void zoomIn(double delta) {
+		System.out.println("Zoom In " + delta);
+		delta *= 0.1;
+        GeneralEnvelope bBox = getBoundsAsEnvelope();
+        
+		String bBoxStr
+            = (bBox.getLowerCorner().getOrdinate(1) + ((1 - aspectXY) * delta * ZOOM_FACTOR)) + "," 
+			+ (bBox.getLowerCorner().getOrdinate(0) + (aspectXY * delta * ZOOM_FACTOR))+ ","
+            + (bBox.getUpperCorner().getOrdinate(1) - ((1 - aspectXY) * delta * ZOOM_FACTOR)) + "," 
+			+ (bBox.getUpperCorner().getOrdinate(0) - (aspectXY * delta * ZOOM_FACTOR));
+        setMapImage(bBoxStr, INIT_SPACIAL_REF_SYS, INIT_LAYER_NUMBER);
     }
 
-    private void zoomOut() {
-      /*  System.out.println("Zomm Out");
-        Envelope bBox = getBoundsAsEnvelope();
-        double median = bBox.getMaxX() + bBox.getMaxY() + bBox.getMinX() + bBox.getMinY();
-        median = median / 4;
-        String bBoxStr
-                = (bBox.getMaxX() + ZOOM_FACTOR) + "," + (bBox.getMaxY() + ZOOM_FACTOR)+ ","
-                + (bBox.getMinX() + ZOOM_FACTOR) + "," + (bBox.getMinY() + ZOOM_FACTOR);
-        setMapImage(bBoxStr, INIT_SPACIAL_REF_SYS, INIT_LAYER_NUMBER);*/
+    private void zoomOut(double delta) {
+        System.out.println("Zomm Out " + delta);
+        delta *= 0.1;
+        GeneralEnvelope bBox = getBoundsAsEnvelope();
+        
+		String bBoxStr
+            = (bBox.getLowerCorner().getOrdinate(1) + ((1 - aspectXY) * delta * ZOOM_FACTOR)) + "," 
+			+ (bBox.getLowerCorner().getOrdinate(0) + (aspectXY * delta * ZOOM_FACTOR))+ ","
+            + (bBox.getUpperCorner().getOrdinate(1) - ((1 - aspectXY) * delta * ZOOM_FACTOR)) + "," 
+			+ (bBox.getUpperCorner().getOrdinate(0) - (aspectXY * delta * ZOOM_FACTOR));
+        setMapImage(bBoxStr, INIT_SPACIAL_REF_SYS, INIT_LAYER_NUMBER);
     }
-
 
     private static final int ZERO = 0;
     private static final int ONE = 1;
@@ -508,14 +521,10 @@ public class Map extends Parent {
         System.out.println("Dragging Image...");
         Point2D.Double from = new Point2D.Double(fromYScreen, fromXScreen);
         Point2D.Double to = new Point2D.Double(toYScreen, toXScreen);
-		System.out.println("Screen");
-		System.out.println(from);
-		System.out.println(to);
+		
 		from = transformScreenToWorld(from);
 		to = transformScreenToWorld(to);
-		System.out.println("World");
-		System.out.println(from);
-		System.out.println(to);
+		
         double fromX = from.getX();
         double fromY = from.getY();
         double toX = to.getX();
@@ -524,14 +533,12 @@ public class Map extends Parent {
         double xOffset = (toX - fromX);// * ZOOM_FACTOR;
         double yOffset = (toY - fromY);// * ZOOM_FACTOR;
         GeneralEnvelope bBox = this.getBoundsAsEnvelope();
-		System.out.println("Old BBox " + bBox);
 
         String bBoxStr
             = (bBox.getLowerCorner().getOrdinate(1) - xOffset) + "," 
 			+ (bBox.getLowerCorner().getOrdinate(0) - yOffset)+ ","
             + (bBox.getUpperCorner().getOrdinate(1) - xOffset) + "," 
 			+ (bBox.getUpperCorner().getOrdinate(0) - yOffset);
-		System.out.println("New BBox " + bBoxStr);
         setMapImage(bBoxStr, INIT_SPACIAL_REF_SYS, INIT_LAYER_NUMBER);
     }
 
@@ -610,7 +617,7 @@ public class Map extends Parent {
             //DOUBLE RIGHT, ZOOM OUT
             if (e.getButton().equals(MouseButton.PRIMARY)) {
                 if (e.getClickCount() > 1) {
-                    zoomIn();
+                    zoomIn(10);
                 }
                 if (e.getClickCount() == 1) {
                     mouseXPosOnClick = e.getX();
@@ -621,7 +628,7 @@ public class Map extends Parent {
             }
             if (e.getButton().equals(MouseButton.SECONDARY)) {
                 if (e.getClickCount() > 1) {
-                    zoomOut();
+                    zoomOut(1);
 
                 }
                 if (e.getClickCount() == 1) {
@@ -678,10 +685,10 @@ public class Map extends Parent {
         public void handle(ScrollEvent e) {
             //WHEN SCROLLED IN, ZOOOM IN, WHEN SCROLLED OUT, ZOOM OUT
             if (e.getDeltaY() > 0) {
-                zoomOut();
+                zoomIn(e.getDeltaY());
             }
             if (e.getDeltaY() < 0) {
-                zoomIn();
+                zoomOut(e.getDeltaY());
             }
         }
     }
