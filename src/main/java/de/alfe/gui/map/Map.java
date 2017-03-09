@@ -23,6 +23,8 @@ package de.alfe.gui.map;
  */
 
 import com.vividsolutions.jts.geom.Envelope;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -55,11 +57,15 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Line;
+import org.geotools.data.ows.CRSEnvelope;
 import org.geotools.data.ows.Layer;
 import org.geotools.data.ows.WMSCapabilities;
 import org.geotools.data.wms.WebMapServer;
 import org.geotools.data.wms.request.GetMapRequest;
+import org.geotools.data.wms.request.GetFeatureInfoRequest;
 import org.geotools.data.wms.response.GetMapResponse;
+import org.geotools.data.wms.response.GetFeatureInfoResponse;
+import org.geotools.geometry.GeneralDirectPosition;
 import org.geotools.geometry.GeneralEnvelope;
 import org.geotools.geometry.jts.ReferencedEnvelope;
 import org.geotools.ows.ServiceException;
@@ -138,7 +144,8 @@ public class Map extends Parent {
     private Group boxGroup;
     private AffineTransform screenToWorld;
     private AffineTransform worldToScreen;
-
+	private CoordinateReferenceSystem crs;
+	
     /**
      * gets the children of this node.
      * @return the children of the node
@@ -157,12 +164,13 @@ public class Map extends Parent {
         this.vBox.getChildren().add(n);
     }
 
-    public Map(WebMapServer wms, Layer layer){
+    public Map(WebMapServer wms, Layer layer, int dimensionX, int dimensionY){
         //TODO
         //try {
             GeneralEnvelope layerBounds = null;
             try{
-                layerBounds = layer.getEnvelope(CRS.decode(this.INIT_SPACIAL_REF_SYS));
+				this.crs = CRS.decode(this.INIT_SPACIAL_REF_SYS);
+                layerBounds = layer.getEnvelope(crs);
             }catch (NoSuchAuthorityCodeException nsa) {
                 System.out.println("Unknown auth code: " + this.INIT_SPACIAL_REF_SYS);
             }
@@ -171,10 +179,20 @@ public class Map extends Parent {
             }
             System.out.println("Layer bounds: " + layerBounds);
             this.layerBBox = layerBounds;
+			
+			//TODO
+			//CRSEnvelope env = new CRSEnvelope();
+			//env.setMinX(49.0772);
+			//env.setMinY(9.15977);
+			//env.setMaxX(51);
+			//env.setMaxY(11);
+			//this.layerBBox.setEnvelope(GeneralEnvelope.toGeneralEnvelope(env));
+			
             this.outerBBOX = layerBounds.getLowerCorner().getOrdinate(0) + ","
                 + layerBounds.getLowerCorner().getOrdinate(1) + ","
                 + layerBounds.getUpperCorner().getOrdinate(0) + ","
                 + layerBounds.getUpperCorner().getOrdinate(1);
+			System.out.println(outerBBOX);
             this.spacialRefSystem = INIT_SPACIAL_REF_SYS;
             this.iw = new ImageView();
             this.epsgField = new TextField(this.spacialRefSystem);
@@ -183,8 +201,8 @@ public class Map extends Parent {
             this.vBox = new VBox();
             this.wms = wms;
             this.displayLayer = layer;
-            this.dimensionX = 600;
-            this.dimensionY = 600;
+            this.dimensionX = dimensionX;
+            this.dimensionY = dimensionY;
 
             layers = new ArrayList<Layer>(0);
             layers.add(layer);
@@ -333,13 +351,22 @@ public class Map extends Parent {
             request.setTransparent(false);//this.TRANSPARACY);
             request.setSRS(spacialRefSys);
 //            request.setBBox(INITIAL_EXTEND_X1 + "," + INITIAL_EXTEND_Y1 + "," + INITIAL_EXTEND_X2 + "," + INITIAL_EXTEND_Y2);
-            request.setBBox(this.outerBBOX);
             this.outerBBOX = bBox;
+			request.setBBox(this.outerBBOX);
+            
             this.spacialRefSystem = spacialRefSys;
             request.addLayer((Layer) layers.get(layerNumber));
             System.out.println("WMS Call for Map Image: "
                     + request.getFinalURL().toString());
-
+			Layer mapLayer = (Layer) layers.get(layerNumber);		
+            GetMapResponse response
+                    = (GetMapResponse) wms.issueRequest(request);
+            Image im = new Image(response.getInputStream());
+            this.ig.getChildren().clear();
+            this.iw = new ImageView();
+            this.iw.setImage(im);
+            this.ig.getChildren().add(this.iw);			
+			
             double mapWidth = layerBBox.getUpperCorner().getOrdinate(0)
                 - layerBBox.getLowerCorner().getOrdinate(0);
             double mapHeight = layerBBox.getUpperCorner().getOrdinate(1)
@@ -351,35 +378,33 @@ public class Map extends Parent {
                     + 0.5 * mapWidth;
             double mapCenterY = layerBBox.getLowerCorner().getOrdinate(1)
                     + 0.5 * mapHeight;
-
-            System.out.println("Center XY Image, Map: " + imageCenterX + " - " + imageCenterY + ";" + mapCenterX + " - " + mapCenterY);
-            System.out.println("Scale: image/map " + imageCenterX / mapCenterX + " - " + imageCenterY + mapCenterY);
-
-            GetMapResponse response
-                    = (GetMapResponse) wms.issueRequest(request);
-            Image im = new Image(response.getInputStream());
-            this.ig.getChildren().clear();
-            this.iw = new ImageView();
-            this.iw.setImage(im);
-            this.ig.getChildren().add(this.iw);
-
-            MapContent content = new MapContent();
+            
+			System.out.println("Center XY Image, Map: " + imageCenterX + " - " + imageCenterY + " , " + mapCenterX + " - " + mapCenterY);
+			System.out.println("Width XY Image, Map " + dimensionX + " - " + dimensionY + " , " + mapWidth + " - " + mapHeight);
+			System.out.println("BBox: " + this.outerBBOX);
+			
+            
+			MapContent content = new MapContent();
             content.addLayer(new WMSLayer(wms, displayLayer));
-            content.setViewport(null);
-            content.getViewport().setScreenArea(new Rectangle(dimensionX, dimensionY));
-            System.out.println(content.getViewport().getScreenToWorld());
+            MapViewport viewport = content.getViewport();			
+            viewport.setScreenArea(new Rectangle(dimensionX, dimensionY));
+			//viewport.setBounds(new ReferencedEnvelope(getBoundsAsEnvelope()));
+			try{
+				viewport.setCoordinateReferenceSystem(CRS.decode("EPSG:4326"));
+			}
+			catch(Exception e){System.out.println(e);}
+			content.setViewport(viewport);
             screenToWorld = content.getViewport().getScreenToWorld();
             worldToScreen = content.getViewport().getWorldToScreen();
-            Point2D.Double upperleft = new Point2D.Double(layerBBox.getUpperCorner().getOrdinate(0), layerBBox.getUpperCorner().getOrdinate(1));
+			
             Point2D.Double center = new Point2D.Double(mapCenterX, mapCenterY);
-            
-            worldToScreen.transform(upperleft, upperleft);
-            System.out.println(upperleft);
-            //drawMarker(upperleft.getX(), upperleft.getY());
-            Point2D.Double d = new Point2D.Double(49.0772, 9.15977) ;
-            worldToScreen.transform(d , d);
-
-            drawMarker(d.getY(), d.getX());
+			System.out.println("Point world, screen");
+			
+			Point2D.Double d = transformWorldToScreen(new Point2D.Double(48.86577105570864, 9.122956112634665));
+			System.out.println("48.86577105570864, 9.122956112634665");
+			System.out.println(d);
+			drawMarker(d.getX(), d.getY());		
+			
         } catch (IOException | ServiceException e) {
             log.log(Level.SEVERE, e.getMessage(), e);
         }
@@ -398,16 +423,17 @@ public class Map extends Parent {
      * gets the referenced Envelope as BoundingBox
      * @return the Bounding Box
      */
-    public Envelope getBoundsAsEnvelope() {
+    public GeneralEnvelope getBoundsAsEnvelope() {
         List<String> bBoxStrList = Arrays.asList(this.outerBBOX.split(","));
-        double upperRightX = Double.parseDouble(bBoxStrList.get(ZERO));
-        double upperRightY = Double.parseDouble(bBoxStrList.get(ONE));
-        double lowerLeftX = Double.parseDouble(bBoxStrList.get(TWO));
-        double lowerLeftY = Double.parseDouble(bBoxStrList.get(THREE));
-        com.vividsolutions.jts.geom.Envelope bBox
-                = new com.vividsolutions.jts.geom.Envelope(
-                upperRightX, upperRightY,
-                lowerLeftX, lowerLeftY);
+		System.out.println(bBoxStrList);
+        double upperRightX = Double.parseDouble(bBoxStrList.get(THREE));
+        double upperRightY = Double.parseDouble(bBoxStrList.get(TWO));
+        double lowerLeftX = Double.parseDouble(bBoxStrList.get(ONE));
+        double lowerLeftY = Double.parseDouble(bBoxStrList.get(ZERO));
+        GeneralEnvelope bBox = new GeneralEnvelope(
+			new GeneralDirectPosition(lowerLeftX, lowerLeftY),
+			new GeneralDirectPosition(upperRightX, upperRightY)
+		);
         return bBox;
     }
 
@@ -419,28 +445,43 @@ public class Map extends Parent {
         return this.spacialRefSystem;
     }
 
+	private Point2D.Double transformScreenToWorld(Point2D.Double screenPoint) {
+		Point2D.Double worldPoint = new Point2D.Double();
+		AffineTransform.getRotateInstance(java.lang.Math.PI, dimensionX/2, dimensionY/2)
+			.transform(screenPoint, worldPoint);
+		screenToWorld.transform(worldPoint, worldPoint);
+		return worldPoint;
+	}
+	
+	private Point2D.Double transformWorldToScreen(Point2D.Double worldPoint) {
+		Point2D.Double screenPoint = new Point2D.Double();
+		worldToScreen.transform(worldPoint, screenPoint);
+		//AffineTransform.getRotateInstance(java.lang.Math.PI, dimensionX/2, dimensionY/2)
+			//.transform(screenPoint, screenPoint);
+		return screenPoint;
+	}
 
 
     private void zoomIn() {
-        System.out.println("Zoom In");
+       /* System.out.println("Zoom In");
         Envelope bBox = getBoundsAsEnvelope();
         double median = bBox.getMaxX() + bBox.getMaxY() + bBox.getMinX() + bBox.getMinY();
         median = median / 4;
         String bBoxStr
                 = (bBox.getMaxX() - (ZOOM_FACTOR)) + "," + (bBox.getMaxY() - (ZOOM_FACTOR))+ ","
                 + (bBox.getMinX() - (ZOOM_FACTOR)) + "," + (bBox.getMinY() - (ZOOM_FACTOR));
-        setMapImage(bBoxStr, INIT_SPACIAL_REF_SYS, INIT_LAYER_NUMBER);
+        setMapImage(bBoxStr, INIT_SPACIAL_REF_SYS, INIT_LAYER_NUMBER);*/
     }
 
     private void zoomOut() {
-        System.out.println("Zomm Out");
+      /*  System.out.println("Zomm Out");
         Envelope bBox = getBoundsAsEnvelope();
         double median = bBox.getMaxX() + bBox.getMaxY() + bBox.getMinX() + bBox.getMinY();
         median = median / 4;
         String bBoxStr
                 = (bBox.getMaxX() + ZOOM_FACTOR) + "," + (bBox.getMaxY() + ZOOM_FACTOR)+ ","
                 + (bBox.getMinX() + ZOOM_FACTOR) + "," + (bBox.getMinY() + ZOOM_FACTOR);
-        setMapImage(bBoxStr, INIT_SPACIAL_REF_SYS, INIT_LAYER_NUMBER);
+        setMapImage(bBoxStr, INIT_SPACIAL_REF_SYS, INIT_LAYER_NUMBER);*/
     }
 
 
@@ -451,24 +492,32 @@ public class Map extends Parent {
 
     private void drag(double fromXScreen, double fromYScreen, double toXScreen, double toYScreen) {
         System.out.println("Dragging Image...");
-        //System.out.println("From: " + fromX + ", " + fromY);
-        //System.out.println("To: " + toX + ", " + toY);
-        Point2D.Double from = new Point2D.Double(fromXScreen, fromYScreen);
-        Point2D.Double to = new Point2D.Double(toXScreen, toYScreen);
-        screenToWorld.transform(from, from);
-        screenToWorld.transform(to, to);
+        Point2D.Double from = new Point2D.Double(fromYScreen, fromXScreen);
+        Point2D.Double to = new Point2D.Double(toYScreen, toXScreen);
+		System.out.println("Screen");
+		System.out.println(from);
+		System.out.println(to);
+		from = transformScreenToWorld(from);
+		to = transformScreenToWorld(to);
+		System.out.println("World");
+		System.out.println(from);
+		System.out.println(to);
         double fromX = from.getX();
         double fromY = from.getY();
         double toX = to.getX();
         double toY = to.getY();
 
-        double xOffset = (toX - fromX) * ZOOM_FACTOR;
-        double yOffset = (toY - fromY) * ZOOM_FACTOR;
-        Envelope bBox = this.getBoundsAsEnvelope();
+        double xOffset = (toX - fromX);// * ZOOM_FACTOR;
+        double yOffset = (toY - fromY);// * ZOOM_FACTOR;
+        GeneralEnvelope bBox = this.getBoundsAsEnvelope();
+		System.out.println("Old BBox " + bBox);
 
         String bBoxStr
-            = (bBox.getMaxX() + xOffset) + "," + (bBox.getMaxY() + yOffset)+ ","
-            + (bBox.getMinX() + xOffset) + "," + (bBox.getMinY() + yOffset);
+            = (bBox.getLowerCorner().getOrdinate(1) - xOffset) + "," 
+			+ (bBox.getLowerCorner().getOrdinate(0) - yOffset)+ ","
+            + (bBox.getUpperCorner().getOrdinate(1) - xOffset) + "," 
+			+ (bBox.getUpperCorner().getOrdinate(0) - yOffset);
+		System.out.println("New BBox " + bBoxStr);
         setMapImage(bBoxStr, INIT_SPACIAL_REF_SYS, INIT_LAYER_NUMBER);
     }
 
@@ -552,6 +601,8 @@ public class Map extends Parent {
                 if (e.getClickCount() == 1) {
                     mouseXPosOnClick = e.getX();
                     mouseYPosOnClick = e.getY();
+					Point2D clickWorld = transformScreenToWorld(new Point2D.Double(e.getY(), e.getX()));					
+					System.out.println("Clicked: S - W " + e.getX() + "," + e.getY() + " - " + clickWorld);
                 }
             }
             if (e.getButton().equals(MouseButton.SECONDARY)) {

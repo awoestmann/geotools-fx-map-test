@@ -61,7 +61,7 @@ public class View {
                 break;
             }
         }
-        this.map = new Map(wms, displayLayer);
+        this.map = new Map(wms, displayLayer, 800,800);
         this.map.setMapCRS(CRS.decode(Map.getEPSGWGS84String()));
 
         this.menuBar = new MenuBar();
