@@ -22,7 +22,13 @@ package de.alfe.gui.map;
  * @author Jochen Saalfeld (jochen@intevation.de)
  */
 
+import com.vividsolutions.jts.geom.Coordinate;
 import com.vividsolutions.jts.geom.Envelope;
+import com.vividsolutions.jts.geom.GeometryFactory;
+import com.vividsolutions.jts.geom.Polygon;
+import com.vividsolutions.jts.io.ParseException;
+import com.vividsolutions.jts.io.WKTReader;
+
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.IOException;
@@ -60,30 +66,51 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Line;
+import org.geotools.data.DataUtilities;
 import org.geotools.data.ows.CRSEnvelope;
 import org.geotools.data.ows.Layer;
 import org.geotools.data.ows.WMSCapabilities;
+import org.geotools.data.wms.xml.Dimension;
+import org.geotools.data.wms.xml.Extent;
 import org.geotools.data.wms.WebMapServer;
 import org.geotools.data.wms.request.GetMapRequest;
 import org.geotools.data.wms.request.GetFeatureInfoRequest;
 import org.geotools.data.wms.response.GetMapResponse;
 import org.geotools.data.wms.response.GetFeatureInfoResponse;
+import org.geotools.feature.DefaultFeatureCollection;
+import org.geotools.feature.SchemaException;
+import org.geotools.feature.simple.SimpleFeatureBuilder;
 import org.geotools.geometry.GeneralDirectPosition;
 import org.geotools.geometry.GeneralEnvelope;
+import org.geotools.geometry.jts.JTS;
 import org.geotools.geometry.jts.ReferencedEnvelope;
-import org.geotools.ows.ServiceException;
-import org.geotools.referencing.CRS;
-import org.geotools.renderer.lite.StreamingRenderer;
-import org.geotools.data.wms.xml.Dimension;
-import org.geotools.data.wms.xml.Extent;
-import org.opengis.referencing.FactoryException;
-import org.opengis.referencing.NoSuchAuthorityCodeException;
-import org.opengis.referencing.crs.CoordinateReferenceSystem;
-import org.jfree.fx.FXGraphics2D;
-
+import org.geotools.map.FeatureLayer;
 import org.geotools.map.MapContent;
 import org.geotools.map.MapViewport;
 import org.geotools.map.WMSLayer;
+import org.geotools.ows.ServiceException;
+import org.geotools.referencing.CRS;
+import org.geotools.renderer.lite.StreamingRenderer;
+import org.geotools.styling.FeatureTypeStyle;
+import org.geotools.styling.Fill;
+import org.geotools.styling.PolygonSymbolizer;
+import org.geotools.styling.Rule;
+import org.geotools.styling.Stroke;
+import org.geotools.styling.Style;
+import org.geotools.styling.StyleBuilder;
+import org.geotools.styling.StyleFactory;
+import org.geotools.styling.Symbolizer;
+import org.opengis.feature.simple.SimpleFeature;
+import org.opengis.feature.simple.SimpleFeatureType;
+import org.opengis.feature.type.GeometryDescriptor;
+import org.opengis.filter.FilterFactory2;
+import org.opengis.referencing.FactoryException;
+import org.opengis.referencing.NoSuchAuthorityCodeException;
+import org.opengis.referencing.crs.CoordinateReferenceSystem;
+import org.opengis.referencing.operation.MathTransform;
+import org.opengis.referencing.operation.TransformException;
+
+import org.jfree.fx.FXGraphics2D;
 
 import java.awt.Rectangle;
 import java.awt.geom.AffineTransform;
@@ -106,6 +133,7 @@ public class Map extends Parent {
     private static final boolean TRANSPARACY = true;
     private static final String INIT_SPACIAL_REF_SYS = "EPSG:4326";
     private static final int INIT_LAYER_NUMBER = 0;
+    private static final String POLYGON_LAYER_TITLE = "polygon-layer";
     private String spacialRefSystem;
     WebMapServer wms;
     Layer displayLayer;
@@ -141,11 +169,13 @@ public class Map extends Parent {
     private static final double INITIAL_EXTEND_X2 = 1681693;
     private static final double INITIAL_EXTEND_Y2 = 5977713;
 
+    DefaultFeatureCollection polygonFeatureCollection;
 
     private static final double TEN_PERCENT_OF = 0.01d;
 
     private static String WPSG_WGS84 = "EPSG:4326";
-
+    private static String WGS84 = "4326";
+    private static String POLYGON_NAME = "polygon";
     private Group boxGroup;
     private AffineTransform screenToWorld;
     private AffineTransform worldToScreen;
@@ -156,6 +186,24 @@ public class Map extends Parent {
     private MapContent mapContent;
     private GraphicsContext gc;
     private Canvas mapCanvas;
+
+    private String selectedPolygonName;
+    private String selectedPolygonID;
+    private GeometryDescriptor geomDesc;
+    private String geometryAttributeName;
+    private String source;
+    private FilterFactory2 ff;
+    private StyleFactory sf;
+    private StyleBuilder sb;
+
+    private static final Color OUTLINE_COLOR = Color.BLACK;
+    private static final Color SELECTED_COLOUR = Color.YELLOW;
+    private static final Color FILL_COLOR = Color.CYAN;
+    private static final Float OUTLINE_WIDTH = 0.3f;
+    private static final Float FILL_TRANSPARACY = 0.4f;
+    private static final Float STROKY_TRANSPARACY = 0.8f;
+
+
 
     /**
      * gets the children of this node.
@@ -176,8 +224,6 @@ public class Map extends Parent {
     }
 
     public Map(WebMapServer wms, Layer layer, int dimensionX, int dimensionY){
-        //TODO
-        //try {
             mapCanvas = new Canvas(dimensionX, dimensionY);
             gc = mapCanvas.getGraphicsContext2D();
             GeneralEnvelope layerBounds = null;
@@ -192,14 +238,6 @@ public class Map extends Parent {
             }
             System.out.println("Layer bounds: " + layerBounds);
             this.layerBBox = layerBounds;
-			
-			//TODO
-			//CRSEnvelope env = new CRSEnvelope();
-			//env.setMinX(49.0772);
-			//env.setMinY(9.15977);
-			//env.setMaxX(51);
-			//env.setMaxY(11);
-			//this.layerBBox.setEnvelope(GeneralEnvelope.toGeneralEnvelope(env));
 			
             this.outerBBOX = layerBounds.getLowerCorner().getOrdinate(0) + ","
                 + layerBounds.getLowerCorner().getOrdinate(1) + ","
@@ -224,16 +262,11 @@ public class Map extends Parent {
             this.ig = new Group();
             boxGroup = new Group();
 
+            System.out.println(wms.getCapabilities().getLayerList());
+
             sourceLabel = new Label(this.serviceName);
             sourceLabel.setLabelFor(this.ig);
-            /*this.ig.getChildren().add(boxGroup);
-            this.add(ig);
-            this.add(sourceLabel);
-            this.add(epsgField);
-            this.add(boundingBoxField);
-            this.add(updateImageButton);
-            this.getChildren().add(vBox);
-            */
+
             this.getChildren().add(mapCanvas);
             this.setMapImage(this.outerBBOX,
                     this.INIT_SPACIAL_REF_SYS,
@@ -245,19 +278,10 @@ public class Map extends Parent {
                 OnMousePressedEvent());
             this.mapCanvas.addEventHandler(MouseEvent.MOUSE_PRESSED, new
                 OnMousePressedEvent());
+            this.mapCanvas.addEventHandler(MouseEvent.MOUSE_DRAGGED, new
+                OnMouseDraggedEvent());
             this.mapCanvas.addEventHandler(ScrollEvent.SCROLL, new
                 OnMouseScrollEvent());
-            //this.mapCanvas.updateImageButton.setOnAction(
-              //  new UpdateImageButtonEventHandler()
-        //);
-       //} catch (IOException | ServiceException e) {
-        //    log.log(Level.SEVERE, e.getMessage(), e);
-        //}
-
-    }
-
-    public Canvas getCanvas(){
-        return this.mapCanvas;
     }
 
     /**
@@ -277,35 +301,23 @@ public class Map extends Parent {
                              int layerNumber) {
         System.out.println("SetImage");
         this.outerBBOX = bBox;
+
         boxGroup.getChildren().clear();
-        double lonWidth = layerBBox.getUpperCorner().getOrdinate(0)
-            - layerBBox.getLowerCorner().getOrdinate(0);
-        double latHeight = layerBBox.getUpperCorner().getOrdinate(1)
-            - layerBBox.getLowerCorner().getOrdinate(1);
-        this.aspectXY = lonWidth/latHeight;
-        System.out.println("Map width/height: " + lonWidth + "/" + latHeight + " - " + aspectXY);
 
-        double imageCenterX = 0.5 * this.dimensionX;
-        double imageCenterY = 0.5 * this.dimensionY;
-        double mapCenterLon = layerBBox.getLowerCorner().getOrdinate(0)
-                + 0.5 * lonWidth;
-        double mapCenterLat = layerBBox.getLowerCorner().getOrdinate(1)
-                + 0.5 * latHeight;
+        refreshViewport();
 
-        System.out.println("Center XY Image, Map: " + imageCenterX + " - " + imageCenterY + " , " + mapCenterLon + " - " + mapCenterLat);
-        System.out.println("Width XY Image, Map " + dimensionX + " - " + dimensionY + " , " + lonWidth + " - " + latHeight);
-        System.out.println("BBox: " + this.outerBBOX);
+        repaint();
 
+        System.out.println("Point world, screen");
+        Point2D.Double d = transformWorldToScreen(new Point2D.Double(48.86577105570864, 9.122956112634665));
+        System.out.println("48.86577105570864, 9.122956112634665");
+        System.out.println(d);
+        drawMarker(d.getX(), d.getY());
+    }
 
-        MapViewport viewport = mapContent.getViewport();
-        viewport.setCoordinateReferenceSystem(crs);
-        viewport.setScreenArea(new Rectangle(dimensionX, dimensionY));
-        viewport.setBounds(getBoundsForViewport());
-        System.out.println(viewport.getBounds());
-        this.mapContent.setViewport(viewport);
-        screenToWorld = mapContent.getViewport().getScreenToWorld();
-        worldToScreen = mapContent.getViewport().getWorldToScreen();
+    //public void 
 
+    public void repaint() {
         StreamingRenderer renderer = new StreamingRenderer();
         renderer.setMapContent(mapContent);
         FXGraphics2D graphics = new FXGraphics2D(this.gc);
@@ -313,22 +325,26 @@ public class Map extends Parent {
         gc.clearRect(0, 0, dimensionX, dimensionY);
         Rectangle rectangle = new Rectangle(dimensionX, dimensionY);
         renderer.paint(graphics, rectangle, mapContent.getViewport().getBounds());
-
-
-        Point2D.Double center = new Point2D.Double(lonWidth, latHeight);
-        System.out.println("Point world, screen");
-
-        /*
-        Point2D.Double d = transformWorldToScreen(new Point2D.Double(48.86577105570864, 9.122956112634665));
-        System.out.println("48.86577105570864, 9.122956112634665");
-        System.out.println(d);
-        drawMarker(d.getX(), d.getY());*/
     }
 
-    //public void 
+    private void refreshViewport(){
+        MapViewport viewport = mapContent.getViewport();
+        viewport.setCoordinateReferenceSystem(crs);
+        viewport.setScreenArea(new Rectangle(dimensionX, dimensionY));
+        viewport.setBounds(getBoundsForViewport());
+        System.out.println("Bounds, crs");
+        System.out.println(viewport.getBounds());
+        System.out.println(this.mapContent.getCoordinateReferenceSystem());
+        this.mapContent.setViewport(viewport);
+        screenToWorld = mapContent.getViewport().getScreenToWorld();
+        worldToScreen = mapContent.getViewport().getWorldToScreen();
+    }
 
-    public void repaint() {
-
+    public void addLayer(org.geotools.map.Layer layer){
+        if(layer != null){
+            this.mapContent.addLayer(layer);
+            repaint();
+        }
     }
 
     /**
@@ -338,7 +354,6 @@ public class Map extends Parent {
     public String getBoundsAsString() {
         return this.outerBBOX;
     }
-
 
     /**
      * gets the referenced Envelope as BoundingBox
@@ -409,9 +424,9 @@ public class Map extends Parent {
         
 		String bBoxStr
             = (bBox.getLowerCorner().getOrdinate(1) + ((1 - aspectXY) * delta * ZOOM_FACTOR)) + ","
-			+ (bBox.getLowerCorner().getOrdinate(0) + (aspectXY * delta * ZOOM_FACTOR))+ ","
+			+ (bBox.getLowerCorner().getOrdinate(0) + ((1 - aspectXY) * delta * ZOOM_FACTOR))+ ","
             + (bBox.getUpperCorner().getOrdinate(1) - ((1 - aspectXY) * delta * ZOOM_FACTOR)) + ","
-			+ (bBox.getUpperCorner().getOrdinate(0) - (aspectXY * delta * ZOOM_FACTOR));
+			+ (bBox.getUpperCorner().getOrdinate(0) - ((1 - aspectXY) * delta * ZOOM_FACTOR));
         setMapImage(bBoxStr, INIT_SPACIAL_REF_SYS, INIT_LAYER_NUMBER);
     }
 
@@ -455,7 +470,11 @@ public class Map extends Parent {
 			+ (bBox.getLowerCorner().getOrdinate(0) - yOffset)+ ","
             + (bBox.getUpperCorner().getOrdinate(1) - xOffset) + ","
 			+ (bBox.getUpperCorner().getOrdinate(0) - yOffset);
-        setMapImage(bBoxStr, INIT_SPACIAL_REF_SYS, INIT_LAYER_NUMBER);
+        //setMapImage(bBoxStr, INIT_SPACIAL_REF_SYS, INIT_LAYER_NUMBER);
+        this.outerBBOX = bBoxStr;
+        //refreshViewport();
+        this.mapContent.getViewport().setBounds(getBoundsForViewport());
+        repaint();
     }
 
     private void drawMarker(double xPosition, double yPosition) {
@@ -490,25 +509,25 @@ public class Map extends Parent {
         upperLine.setFill(null);
         upperLine.setStroke(Color.RED);
         upperLine.setStrokeWidth(2);
-        boxGroup.getChildren().add(upperLine);
+        this.getChildren().add(upperLine);
 
         Line leftLine = new Line(beginX, beginY, beginX, endY);
         leftLine.setFill(null);
         leftLine.setStroke(Color.RED);
         leftLine.setStrokeWidth(2);
-        boxGroup.getChildren().add(leftLine);
+        this.getChildren().add(leftLine);
 
         Line buttomLine = new Line(beginX, endY, endX, endY);
         buttomLine.setFill(null);
         buttomLine.setStroke(Color.RED);
         buttomLine.setStrokeWidth(2);
-        boxGroup.getChildren().add(buttomLine);
+        this.getChildren().add(buttomLine);
 
         Line rightLine = new Line(endX, beginY , endX, endY);
         rightLine.setFill(null);
         rightLine.setStroke(Color.RED);
         rightLine.setStrokeWidth(2);
-        boxGroup.getChildren().add(rightLine);
+        this.getChildren().add(rightLine);
     }
     /**
      * Event Handler for the choose Service Button.
@@ -609,6 +628,16 @@ public class Map extends Parent {
         }
     }
 
+    /** Event handler for dragging events, doesnt reload the actual map */
+    private class OnMouseDraggedEvent
+            implements EventHandler<MouseEvent> {
+        @Override
+        public void handle(MouseEvent e){
+            double xOffset = e.getSceneX() - mouseXPosOnClick;
+            double yOffset = e.getSceneY() - mouseYPosOnClick;
+            //TODO:
+        }
+    }
     //Does not work, because the map itself aint an Input-Field
     /*
     private class OnPressedPlusOrMinusEvent
@@ -635,9 +664,141 @@ public class Map extends Parent {
 
     }
 
-    public void drawPolygons(List<String> polyList) {
+    public void drawStringPolygons(List<String> wktPolygonList) throws
+              ParseException, FactoryException, SchemaException {
+          WKTReader reader = new WKTReader(new GeometryFactory());
+          CoordinateReferenceSystem crs = CRS.decode(WPSG_WGS84);
+          List<FeaturePolygon> featurePolygons = new ArrayList<>();
+          int i = 1;
+          for (String wktPolygon: wktPolygonList) {
+              FeaturePolygon fp =
+                      new FeaturePolygon( (Polygon) reader.read(wktPolygon),
+                              POLYGON_NAME + i,
+                              String.valueOf(i),
+                              crs);
+              featurePolygons.add(fp);
+              i++;
+          }
+          SimpleFeatureType polygonFeatureType = DataUtilities.createType(
+                  "Dataset",
+                  "geometry:Geometry:srid="
+                          + WGS84
+                          + ","
+                          + "name:String,"
+                          + "id:String"
+          );
+          DefaultFeatureCollection polygonFeatureCollection =
+                  new DefaultFeatureCollection("internal",
+                          polygonFeatureType);
+          GeometryDescriptor geomDesc = polygonFeatureCollection.getSchema()
+                  .getGeometryDescriptor();
+          String geometryAttributeName = geomDesc.getLocalName();
+          for (FeaturePolygon fp : featurePolygons) {
+              SimpleFeatureBuilder featureBuilder =
+                      new SimpleFeatureBuilder(polygonFeatureType);
+              try {
+                  MathTransform transform = CRS.findMathTransform(
+                          fp.crs, this.mapContent.getViewport().getCoordinateReferenceSystem());
+                  featureBuilder.add((Polygon) JTS.transform(fp.polygon,
+                          transform));
+                  featureBuilder.add(fp.name);
+                  featureBuilder.add(fp.id);
+                  SimpleFeature feature = featureBuilder.buildFeature(null);
+                  polygonFeatureCollection.add(feature);
+              } catch (FactoryException | TransformException e) {
+                  System.err.println(e);
+              }
+          }
+          MapStyles ms = new MapStyles(geometryAttributeName);
+          org.geotools.map.Layer polygonLayer = new FeatureLayer(
+                  polygonFeatureCollection, ms.createPolygonStyle());
+          polygonLayer.setTitle(POLYGON_LAYER_TITLE);
+          List<org.geotools.map.Layer> layers = mapContent.layers();
+          for (org.geotools.map.Layer layer : layers) {
+              if (layer.getTitle() != null) {
+                  if (layer.getTitle().equals(POLYGON_LAYER_TITLE)) {
+                      mapContent.removeLayer(layer);
+                  }
+              }
+          }
+          addLayer(polygonLayer);
+      }
+
+    /**
+     * Draws Polygons on the maps.
+     *
+     * @param featurePolygons List of drawable Polygons
+     */
+    public void drawPolygons(List<FeaturePolygon> featurePolygons) {
+        try {
+
+            SimpleFeatureType polygonFeatureType;
+
+            String epsgCode = this
+                    .crs
+                    .getIdentifiers()
+                    .toArray()[0]
+                    .toString();
+            epsgCode = epsgCode.substring(epsgCode.lastIndexOf(":") + 1,
+                    epsgCode.length());
+            polygonFeatureType = DataUtilities.createType(
+                    "Dataset",
+                    "geometry:Geometry:srid="
+                            + epsgCode
+                            + ","
+                            + "name:String,"
+                            + "id:String"
+            );
+            polygonFeatureCollection =
+                    new DefaultFeatureCollection("internal",
+                            polygonFeatureType);
+            geomDesc = polygonFeatureCollection.getSchema()
+                    .getGeometryDescriptor();
+            geometryAttributeName = geomDesc.getLocalName();
+
+           for (FeaturePolygon fp : featurePolygons) {
+                SimpleFeatureBuilder featureBuilder =
+                        new SimpleFeatureBuilder(polygonFeatureType);
+                try {
+                    MathTransform transform = CRS.findMathTransform(
+                            fp.crs, this.crs);
+                    featureBuilder.add((Polygon) JTS.transform(fp.polygon,
+                            transform));
+                    featureBuilder.add(fp.name);
+                    featureBuilder.add(fp.id);
+                    SimpleFeature feature = featureBuilder.buildFeature(null);
+                    polygonFeatureCollection.add(feature);
+                } catch (FactoryException | TransformException e) {
+                    log.log(Level.SEVERE, e.getMessage(), e);
+                }
+            }
+            org.geotools.map.Layer polygonLayer = new FeatureLayer(
+                    polygonFeatureCollection, createPolygonStyle());
+            polygonLayer.setTitle(POLYGON_LAYER_TITLE);
+            List<org.geotools.map.Layer> layers = mapContent.layers();
+            for (org.geotools.map.Layer layer : layers) {
+                if (layer.getTitle() != null) {
+                    if (layer.getTitle().equals(POLYGON_LAYER_TITLE)) {
+                        mapContent.removeLayer(layer);
+                    }
+                }
+            }
+            mapContent.addLayer(polygonLayer);
+        } catch (SchemaException e) {
+            log.log(Level.SEVERE, e.getMessage(), e);
+        }
     }
 
+    private Style createPolygonStyle() {
+        Fill fill = sf.createFill(ff.literal(FILL_COLOR),
+                ff.literal(FILL_TRANSPARACY));
+        Stroke stroke = sf.createStroke(ff.literal(OUTLINE_COLOR),
+                ff.literal(OUTLINE_WIDTH),
+                ff.literal(STROKY_TRANSPARACY));
+        PolygonSymbolizer polygonSymbolizer =
+                sf.createPolygonSymbolizer(stroke, fill, null);
+        return this.sb.createStyle(polygonSymbolizer);
+    }
 
     public void highlightSelectedPolygon(String s) {
 

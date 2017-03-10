@@ -120,15 +120,14 @@ public class View {
         public void handle(Event event) {
             List<String> polygonList = new ArrayList<String>();
             polygonList.add(DataBean.singleUnturnedWGS84ComplexPolygonWKT());
-            //TODO:
-            //try {
-             //   map.drawPolygons(polygonList);
-            //} catch (ParseException
-              //      | FactoryException
-                //    | SchemaException
-                  //  e){
-                //System.err.println(e);
-            //}
+            try {
+                map.drawStringPolygons(polygonList);
+            } catch (ParseException
+                    | FactoryException
+                    | SchemaException
+                    e){
+                System.err.println(e);
+            }
         }
     }
 
@@ -138,15 +137,14 @@ public class View {
         public void handle(Event event) {
             List<String> polygonList = new ArrayList<String>();
             polygonList.add(DataBean.singleTurnedWGS84ComplexPolygonWKT());
-            //TODO
-            //try {
-            //    map.drawPolygons(polygonList);
-            //} catch (ParseException
-            //        | FactoryException
-            //        | SchemaException
-            //        e){
-            //    System.err.println(e);
-            //}
+            try {
+                map.drawStringPolygons(polygonList);
+            } catch (ParseException
+                    | FactoryException
+                    | SchemaException
+                    e){
+                System.err.println(e);
+            }
         }
     }
 }
