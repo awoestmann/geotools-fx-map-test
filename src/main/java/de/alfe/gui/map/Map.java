@@ -66,6 +66,8 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Line;
+import javafx.scene.transform.Affine;
+import javafx.scene.transform.Translate;
 import org.geotools.data.DataUtilities;
 import org.geotools.data.ows.CRSEnvelope;
 import org.geotools.data.ows.Layer;
@@ -161,7 +163,7 @@ public class Map extends Parent {
     private double previousMouseYPosOnClick;
 
     private static final double DRAGGING_OFFSET = 4;
-    private static final double ZOOM_FACTOR = 0.1d;
+    private static final double ZOOM_FACTOR = 1.5d;
     private static final double HUNDRED = 100d;
 
     private static final double INITIAL_EXTEND_X1 = 850028;
@@ -302,11 +304,20 @@ public class Map extends Parent {
         System.out.println("SetImage");
         this.outerBBOX = bBox;
 
+        double lonWidth = layerBBox.getUpperCorner().getOrdinate(0)
+                 - layerBBox.getLowerCorner().getOrdinate(0);
+        double latHeight = layerBBox.getUpperCorner().getOrdinate(1)
+                 - layerBBox.getLowerCorner().getOrdinate(1);
+        this.aspectXY = lonWidth/latHeight;
+
         boxGroup.getChildren().clear();
 
         refreshViewport();
-
+        
         repaint();
+
+        WMSLayer wmsLayer = (WMSLayer) mapContent.layers().get(0);
+        System.out.println(wmsLayer.getLastGetMap().getFinalURL());
 
         System.out.println("Point world, screen");
         Point2D.Double d = transformWorldToScreen(new Point2D.Double(48.86577105570864, 9.122956112634665));
@@ -416,17 +427,19 @@ public class Map extends Parent {
 		return screenPoint;
 	}
 
-
+    //TODO: https://github.com/geotools/geotools/blob/master/modules/unsupported/swing/src/main/java/org/geotools/swing/tool/ScrollWheelTool.java
     private void zoomIn(double delta) {
 		System.out.println("Zoom In " + delta);
 		delta *= 0.1;
         GeneralEnvelope bBox = getBoundsAsEnvelope();
-        
-		String bBoxStr
-            = (bBox.getLowerCorner().getOrdinate(1) + ((1 - aspectXY) * delta * ZOOM_FACTOR)) + ","
-			+ (bBox.getLowerCorner().getOrdinate(0) + ((1 - aspectXY) * delta * ZOOM_FACTOR))+ ","
-            + (bBox.getUpperCorner().getOrdinate(1) - ((1 - aspectXY) * delta * ZOOM_FACTOR)) + ","
-			+ (bBox.getUpperCorner().getOrdinate(0) - ((1 - aspectXY) * delta * ZOOM_FACTOR));
+        Point2D.Double lower = transformScreenToWorld(new Point2D.Double(0 + (delta * ZOOM_FACTOR), 0 + (delta * ZOOM_FACTOR)));
+        Point2D.Double upper = transformScreenToWorld(new Point2D.Double(dimensionX - (delta * ZOOM_FACTOR), dimensionY - (delta * ZOOM_FACTOR)));
+        String bBoxStr = lower.getX() + "," + lower.getY() + "," + upper.getX() + "," + upper.getY();
+		/*String bBoxStr
+            = (bBox.getLowerCorner().getOrdinate(1) * 1.1) + "," //((aspectXY) * delta * ZOOM_FACTOR)) + ","
+			+ (bBox.getLowerCorner().getOrdinate(0) * 1.1) + "," //((aspectXY) * delta * ZOOM_FACTOR))+ ","
+            + (bBox.getUpperCorner().getOrdinate(1) / 1.1) + "," //((aspectXY) * delta * ZOOM_FACTOR)) + ","
+			+ (bBox.getUpperCorner().getOrdinate(0) / 1.1) ;     //((aspectXY) * delta * ZOOM_FACTOR));*/
         setMapImage(bBoxStr, INIT_SPACIAL_REF_SYS, INIT_LAYER_NUMBER);
     }
 

@@ -43,7 +43,9 @@ public class View {
     private static final double sceneHeight = 768;
     private static final double sceneWidth = 1024;
     private static final String wmsURL = "http://sg.geodatenzentrum.de/wms_webatlasde.light";
+//    private static final String wmsURL = "http://www.gebco.net/data_and_products/gebco_web_services/web_map_service/mapserv";
     private static final String wmsLayer = "webatlasde.light";
+    //private static final String wmsLayer = "GEBCO_GRID";
 
     public View() throws IOException, ServiceException, FactoryException {
         this(new URL(wmsURL), wmsLayer);
