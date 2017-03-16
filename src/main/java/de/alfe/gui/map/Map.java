@@ -40,6 +40,8 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.Timer;
+import java.util.TimerTask;
 import javafx.collections.ObservableList;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
@@ -72,7 +74,6 @@ import org.geotools.data.DataUtilities;
 import org.geotools.data.ows.CRSEnvelope;
 import org.geotools.data.ows.Layer;
 import org.geotools.data.ows.WMSCapabilities;
-import org.geotools.data.wms.xml.Dimension;
 import org.geotools.data.wms.xml.Extent;
 import org.geotools.data.wms.WebMapServer;
 import org.geotools.data.wms.request.GetMapRequest;
@@ -106,6 +107,7 @@ import org.opengis.feature.simple.SimpleFeature;
 import org.opengis.feature.simple.SimpleFeatureType;
 import org.opengis.feature.type.GeometryDescriptor;
 import org.opengis.filter.FilterFactory2;
+import org.opengis.geometry.DirectPosition;
 import org.opengis.referencing.FactoryException;
 import org.opengis.referencing.NoSuchAuthorityCodeException;
 import org.opengis.referencing.crs.CoordinateReferenceSystem;
@@ -158,12 +160,13 @@ public class Map extends Parent {
 
     private double mouseXPosOnClick;
     private double mouseYPosOnClick;
+    private double lastMouseXPos;
+    private double lastMouseYPos;
 
     private double previousMouseXPosOnClick;
     private double previousMouseYPosOnClick;
 
     private static final double DRAGGING_OFFSET = 4;
-    private static final double ZOOM_FACTOR = 1.5d;
     private static final double HUNDRED = 100d;
 
     private static final double INITIAL_EXTEND_X1 = 850028;
@@ -183,11 +186,21 @@ public class Map extends Parent {
     private AffineTransform worldToScreen;
 	private CoordinateReferenceSystem crs;
 
+    private int zoomLevel;
+    private int lastZoomLevel;
+    private Timer zoomTimer;
+    private TimerTask zoomTask;
+    private final int ZOOM_TIMEOUT = 150;
+    private final int MAX_ZOOM_LEVEL = 100;
+    private final double ZOOM_FACTOR = 1.5;
+
 	private double aspectXY;
     private Rectangle2D imageViewport;
     private MapContent mapContent;
     private GraphicsContext gc;
     private Canvas mapCanvas;
+    private StreamingRenderer renderer;
+    private FXGraphics2D graphics;
 
     private String selectedPolygonName;
     private String selectedPolygonID;
@@ -228,6 +241,8 @@ public class Map extends Parent {
     public Map(WebMapServer wms, Layer layer, int dimensionX, int dimensionY){
             mapCanvas = new Canvas(dimensionX, dimensionY);
             gc = mapCanvas.getGraphicsContext2D();
+            zoomLevel = 0;
+            lastZoomLevel = 0;
             GeneralEnvelope layerBounds = null;
             try{
 				this.crs = CRS.decode(this.INIT_SPACIAL_REF_SYS);
@@ -238,14 +253,14 @@ public class Map extends Parent {
             catch (FactoryException f) {
                 System.out.println("Factory Exception");
             }
-            System.out.println("Layer bounds: " + layerBounds);
+            //System.out.println("Layer bounds: " + layerBounds);
             this.layerBBox = layerBounds;
 			
             this.outerBBOX = layerBounds.getLowerCorner().getOrdinate(0) + ","
                 + layerBounds.getLowerCorner().getOrdinate(1) + ","
                 + layerBounds.getUpperCorner().getOrdinate(0) + ","
                 + layerBounds.getUpperCorner().getOrdinate(1);
-			System.out.println(outerBBOX);
+			//System.out.println(outerBBOX);
             this.spacialRefSystem = INIT_SPACIAL_REF_SYS;
             this.iw = new ImageView();
             this.epsgField = new TextField(this.spacialRefSystem);
@@ -264,7 +279,7 @@ public class Map extends Parent {
             this.ig = new Group();
             boxGroup = new Group();
 
-            System.out.println(wms.getCapabilities().getLayerList());
+            //System.out.println(wms.getCapabilities().getLayerList());
 
             sourceLabel = new Label(this.serviceName);
             sourceLabel.setLabelFor(this.ig);
@@ -284,6 +299,9 @@ public class Map extends Parent {
                 OnMouseDraggedEvent());
             this.mapCanvas.addEventHandler(ScrollEvent.SCROLL, new
                 OnMouseScrollEvent());
+
+            zoomTimer = new Timer(true);
+
     }
 
     /**
@@ -317,21 +335,21 @@ public class Map extends Parent {
         repaint();
 
         WMSLayer wmsLayer = (WMSLayer) mapContent.layers().get(0);
-        System.out.println(wmsLayer.getLastGetMap().getFinalURL());
+        //System.out.println(wmsLayer.getLastGetMap().getFinalURL());
 
-        System.out.println("Point world, screen");
-        Point2D.Double d = transformWorldToScreen(new Point2D.Double(48.86577105570864, 9.122956112634665));
-        System.out.println("48.86577105570864, 9.122956112634665");
-        System.out.println(d);
-        drawMarker(d.getX(), d.getY());
+        //System.out.println("Point world, screen");
+        //Point2D.Double d = transformWorldToScreen(new Point2D.Double(48.86577105570864, 9.122956112634665));
+        //System.out.println("48.86577105570864, 9.122956112634665");
+        //System.out.println(d);
+        //drawMarker(d.getX(), d.getY());
     }
 
     //public void 
 
     public void repaint() {
-        StreamingRenderer renderer = new StreamingRenderer();
+        renderer = new StreamingRenderer();
         renderer.setMapContent(mapContent);
-        FXGraphics2D graphics = new FXGraphics2D(this.gc);
+        graphics = new FXGraphics2D(this.gc);
         graphics.setBackground(java.awt.Color.BLACK);
         gc.clearRect(0, 0, dimensionX, dimensionY);
         Rectangle rectangle = new Rectangle(dimensionX, dimensionY);
@@ -339,14 +357,9 @@ public class Map extends Parent {
     }
 
     private void refreshViewport(){
-        MapViewport viewport = mapContent.getViewport();
-        viewport.setCoordinateReferenceSystem(crs);
-        viewport.setScreenArea(new Rectangle(dimensionX, dimensionY));
-        viewport.setBounds(getBoundsForViewport());
-        System.out.println("Bounds, crs");
-        System.out.println(viewport.getBounds());
-        System.out.println(this.mapContent.getCoordinateReferenceSystem());
-        this.mapContent.setViewport(viewport);
+        this.mapContent.getViewport().setCoordinateReferenceSystem(crs);
+        this.mapContent.getViewport().setScreenArea(new Rectangle(dimensionX, dimensionY));
+        this.mapContent.getViewport().setBounds(getBoundsForViewport());
         screenToWorld = mapContent.getViewport().getScreenToWorld();
         worldToScreen = mapContent.getViewport().getWorldToScreen();
     }
@@ -427,34 +440,57 @@ public class Map extends Parent {
 		return screenPoint;
 	}
 
-    //TODO: https://github.com/geotools/geotools/blob/master/modules/unsupported/swing/src/main/java/org/geotools/swing/tool/ScrollWheelTool.java
-    private void zoomIn(double delta) {
-		System.out.println("Zoom In " + delta);
-		delta *= 0.1;
-        GeneralEnvelope bBox = getBoundsAsEnvelope();
-        Point2D.Double lower = transformScreenToWorld(new Point2D.Double(0 + (delta * ZOOM_FACTOR), 0 + (delta * ZOOM_FACTOR)));
-        Point2D.Double upper = transformScreenToWorld(new Point2D.Double(dimensionX - (delta * ZOOM_FACTOR), dimensionY - (delta * ZOOM_FACTOR)));
-        String bBoxStr = lower.getX() + "," + lower.getY() + "," + upper.getX() + "," + upper.getY();
-		/*String bBoxStr
-            = (bBox.getLowerCorner().getOrdinate(1) * 1.1) + "," //((aspectXY) * delta * ZOOM_FACTOR)) + ","
-			+ (bBox.getLowerCorner().getOrdinate(0) * 1.1) + "," //((aspectXY) * delta * ZOOM_FACTOR))+ ","
-            + (bBox.getUpperCorner().getOrdinate(1) / 1.1) + "," //((aspectXY) * delta * ZOOM_FACTOR)) + ","
-			+ (bBox.getUpperCorner().getOrdinate(0) / 1.1) ;     //((aspectXY) * delta * ZOOM_FACTOR));*/
+    private void zoom(int zoomDelta, double x, double y) {
+        if(zoomDelta == 0) {
+            return;
+        }
+        Point2D.Double lower;
+        Point2D.Double upper;
+        double newZoom = ZOOM_FACTOR * zoomDelta;
+
+        if(zoomDelta > 0) {
+            lower = new Point2D.Double((dimensionX / 2) - (0.5 * dimensionX / newZoom),
+                    (dimensionY / 2) - (0.5 * dimensionY / newZoom));
+            upper = new Point2D.Double((dimensionX / 2) + (0.5 * dimensionX / newZoom),
+                    (dimensionY / 2) + (0.5  * dimensionY/newZoom));
+        }
+        else {
+            newZoom *= -1;
+            lower = new Point2D.Double((dimensionX / 2) - (0.5 * dimensionX * newZoom),
+                    (dimensionY / 2) - (0.5 * dimensionY * newZoom));
+            upper = new Point2D.Double((dimensionX / 2) + (0.5 * dimensionX * newZoom),
+                    (dimensionY / 2) + (0.5  * dimensionY * newZoom));
+        }
+            System.out.println(lower + " - " + upper);
+            lower = transformScreenToWorld(lower);
+            upper = transformScreenToWorld(upper);
+        String bBoxStr = lower.getX() + ","
+            + lower.getY() + ","
+            + upper.getX() + ","
+            + upper.getY();
         setMapImage(bBoxStr, INIT_SPACIAL_REF_SYS, INIT_LAYER_NUMBER);
     }
 
-    private void zoomOut(double delta) {
-        System.out.println("Zomm Out " + delta);
-        delta *= 0.1;
-        GeneralEnvelope bBox = getBoundsAsEnvelope();
-        
-		String bBoxStr
-            = (bBox.getLowerCorner().getOrdinate(1) + ((1 - aspectXY) * delta * ZOOM_FACTOR)) + ","
-			+ (bBox.getLowerCorner().getOrdinate(0) + (aspectXY * delta * ZOOM_FACTOR))+ ","
-            + (bBox.getUpperCorner().getOrdinate(1) - ((1 - aspectXY) * delta * ZOOM_FACTOR)) + ","
-			+ (bBox.getUpperCorner().getOrdinate(0) - (aspectXY * delta * ZOOM_FACTOR));
-        setMapImage(bBoxStr, INIT_SPACIAL_REF_SYS, INIT_LAYER_NUMBER);
+    //TODO: https://github.com/geotools/geotools/blob/master/modules/unsupported/swing/src/main/java/org/geotools/swing/tool/ScrollWheelTool.java
+    private void zoomIn(double delta, double screenX, double screenY) {
+		if(delta == 0) {
+            return;
+        }
+        System.out.println("Zoom In " + delta);
+        Point2D.Double lower = transformScreenToWorld(new Point2D.Double(0 + (delta * ZOOM_FACTOR), 0 + (delta * ZOOM_FACTOR)));
+        Point2D.Double upper = transformScreenToWorld(new Point2D.Double(dimensionX - (delta * ZOOM_FACTOR), dimensionY - (delta * ZOOM_FACTOR)));
+        String bBoxStr = lower.getX() + "," + lower.getY() + "," + upper.getX() + "," + upper.getY();
+
+             setMapImage(bBoxStr, INIT_SPACIAL_REF_SYS, INIT_LAYER_NUMBER);
     }
+
+    private void zoomOut(double delta, double screenX, double screenY) {
+        System.out.println("Zomm Out " + delta);
+        Point2D.Double lower = transformScreenToWorld(new Point2D.Double(0 + (delta * ZOOM_FACTOR), 0 + (delta * ZOOM_FACTOR)));
+        Point2D.Double upper = transformScreenToWorld(new Point2D.Double(dimensionX - (delta * ZOOM_FACTOR), dimensionY - (delta * ZOOM_FACTOR)));
+        String bBoxStr = lower.getX() + "," + lower.getY() + "," + upper.getX() + "," + upper.getY();
+	    setMapImage(bBoxStr, INIT_SPACIAL_REF_SYS, INIT_LAYER_NUMBER);
+        }
 
     private static final int ZERO = 0;
     private static final int ONE = 1;
@@ -483,11 +519,11 @@ public class Map extends Parent {
 			+ (bBox.getLowerCorner().getOrdinate(0) - yOffset)+ ","
             + (bBox.getUpperCorner().getOrdinate(1) - xOffset) + ","
 			+ (bBox.getUpperCorner().getOrdinate(0) - yOffset);
-        //setMapImage(bBoxStr, INIT_SPACIAL_REF_SYS, INIT_LAYER_NUMBER);
         this.outerBBOX = bBoxStr;
         //refreshViewport();
-        this.mapContent.getViewport().setBounds(getBoundsForViewport());
-        repaint();
+        //this.mapContent.getViewport().setBounds(getBoundsForViewport());
+        //repaint();
+        setMapImage(bBoxStr, INIT_SPACIAL_REF_SYS, INIT_LAYER_NUMBER);
     }
 
     private void drawMarker(double xPosition, double yPosition) {
@@ -565,10 +601,12 @@ public class Map extends Parent {
             //DOUBLE RIGHT, ZOOM OUT
             if (e.getButton().equals(MouseButton.PRIMARY)) {
                 if (e.getClickCount() > 1) {
-                    zoomIn(10);
+                    zoomIn(10, 0,0);
                 }
                 if (e.getClickCount() == 1) {
                     mouseXPosOnClick = e.getX();
+                    lastMouseXPos = mouseXPosOnClick;
+                    lastMouseYPos = mouseYPosOnClick;
                     mouseYPosOnClick = e.getY();
 					Point2D clickWorld = transformScreenToWorld(new Point2D.Double(e.getY(), e.getX()));
 					System.out.println("Clicked: S - W " + e.getX() + "," + e.getY() + " - " + clickWorld);
@@ -576,7 +614,7 @@ public class Map extends Parent {
             }
             if (e.getButton().equals(MouseButton.SECONDARY)) {
                 if (e.getClickCount() > 1) {
-                    zoomOut(1);
+                    zoomOut(1,0,0);
 
                 }
                 if (e.getClickCount() == 1) {
@@ -633,21 +671,42 @@ public class Map extends Parent {
         public void handle(ScrollEvent e) {
             //WHEN SCROLLED IN, ZOOOM IN, WHEN SCROLLED OUT, ZOOM OUT
             if (e.getDeltaY() > 0) {
-                zoomIn(e.getDeltaY());
+                zoomLevel++;
             }
             if (e.getDeltaY() < 0) {
-                zoomOut(e.getDeltaY());
+                zoomLevel--;
             }
+            try{
+                zoomTimer.cancel();
+            } catch(IllegalStateException ex) {System.out.println(ex);}
+            zoomTimer = new Timer(true);
+            zoomTask = new TimerTask() {
+                public void run() {
+                    System.out.println("Zoom from to: " + lastZoomLevel + " - " + zoomLevel);
+                    int zoomDelta = zoomLevel - lastZoomLevel;
+                    //if(zoomDelta >= 0) {
+                      //    zoomIn(zoomDelta, 0,0);
+                    //} else {
+                      //  zoomOut(zoomDelta, 0, 0);
+                    //}
+                    zoom(zoomDelta, e.getX(), e.getY());
+                    lastZoomLevel = zoomLevel;
+                }
+            };
+            zoomTimer.schedule(zoomTask, ZOOM_TIMEOUT);
+
         }
     }
 
-    /** Event handler for dragging events, doesnt reload the actual map */
+    /** Event handler for dragging events, does not reload the actual map */
     private class OnMouseDraggedEvent
             implements EventHandler<MouseEvent> {
         @Override
         public void handle(MouseEvent e){
-            double xOffset = e.getSceneX() - mouseXPosOnClick;
-            double yOffset = e.getSceneY() - mouseYPosOnClick;
+            double xOffset = e.getX() - lastMouseXPos;
+            double yOffset = e.getY() - lastMouseYPos;
+            lastMouseXPos += xOffset;
+            lastMouseYPos += yOffset;
             //TODO:
         }
     }
