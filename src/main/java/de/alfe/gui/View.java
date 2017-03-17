@@ -3,13 +3,18 @@ package de.alfe.gui;
 import com.vividsolutions.jts.io.ParseException;
 import de.alfe.gui.map.Map;
 import de.alfe.util.DataBean;
+import javafx.event.ActionEvent;
 import javafx.event.Event;
 import javafx.event.EventHandler;
 import javafx.geometry.Rectangle2D;
 import javafx.scene.Scene;
+import javafx.scene.control.Button;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.VBox;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.TextField;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.text.Text;
@@ -20,6 +25,7 @@ import org.geotools.data.wms.WebMapServer;
 import org.geotools.feature.SchemaException;
 import org.geotools.ows.ServiceException;
 import org.geotools.referencing.CRS;
+import org.opengis.referencing.crs.CoordinateReferenceSystem;
 import org.opengis.referencing.FactoryException;
 
 import java.io.IOException;
@@ -42,10 +48,11 @@ public class View {
     private VBox statusBar;
     private static final double sceneHeight = 768;
     private static final double sceneWidth = 1024;
-    private static final String wmsURL = "http://sg.geodatenzentrum.de/wms_webatlasde.light";
-//    private static final String wmsURL = "http://www.gebco.net/data_and_products/gebco_web_services/web_map_service/mapserv";
-    private static final String wmsLayer = "webatlasde.light";
-    //private static final String wmsLayer = "GEBCO_GRID";
+    //private static final String wmsURL = "http://sg.geodatenzentrum.de/wms_webatlasde.light";
+    private static final String wmsURL = "http://ows.terrestris.de/osm/service";
+
+    //private static final String wmsLayer = "webatlasde.light";
+    private static final String wmsLayer = "OpenStreetMap WMS - by terrestris";
 
     public View() throws IOException, ServiceException, FactoryException {
         this(new URL(wmsURL), wmsLayer);
@@ -58,12 +65,14 @@ public class View {
         WebMapServer wms = new WebMapServer(wmsURL);
         Layer displayLayer = wms.getCapabilities().getLayer();
         for (Layer layer: wms.getCapabilities().getLayerList()) {
-            if (layer.getTitle().toLowerCase().equals(wmsLayer)) {
+            System.out.println("Layer: " + layer);
+            if (layer.getTitle().toLowerCase().equals(wmsLayer)
+                | layer.getTitle().equals(wmsLayer)) {
                 displayLayer = layer;
                 break;
             }
         }
-        this.map = new Map(wms, displayLayer, 800,800);
+        this.map = new Map(wms, displayLayer, 1024, 768);
         this.map.setMapCRS(CRS.decode(Map.getEPSGWGS84String()));
 
         this.menuBar = new MenuBar();
@@ -91,8 +100,46 @@ public class View {
         final Text statusText = new Text("Ready");
         this.statusBar.getChildren().add(statusText);
 
+        VBox vbox = new VBox();
+        HBox hbox = new HBox();
+
+        Button reset = new Button("reset");
+        reset.setOnAction(new EventHandler<ActionEvent>(){
+            @Override
+            public void handle(ActionEvent e){
+                map.resetExtent();
+            }
+        });
+
+        TextField epsgField = new TextField(Map.getEPSGWGS84String());
+        Button changeCrs = new Button("Change CRS");
+        changeCrs.setOnAction(new EventHandler<ActionEvent>(){
+            @Override
+            public void handle(ActionEvent e){
+                try{
+                    map.setMapCRS(CRS.decode(epsgField.getText()));
+                } catch (Exception ex) {
+                    System.out.println("Error on decoding: " + epsgField.getText());
+                }
+            }
+        });
+
+        Button resize = new Button("resize");
+        resize.setOnAction(new EventHandler<ActionEvent>(){
+            @Override
+            public void handle(ActionEvent e){
+                map.resize(400, 400);
+            }
+        });
+
+        vbox.getChildren().add(hbox);
+        vbox.getChildren().add(map);
+        hbox.getChildren().add(reset);
+        hbox.getChildren().add(epsgField);
+        hbox.getChildren().add(changeCrs);
+        hbox.getChildren().add(resize);
         this.borderPane.setTop(this.menuBar);
-        this.borderPane.setCenter(this.map);
+        this.borderPane.setCenter(vbox);
         this.borderPane.setBottom(this.statusBar);
 
         this.scene = new Scene(this.borderPane, sceneHeight, sceneWidth);
