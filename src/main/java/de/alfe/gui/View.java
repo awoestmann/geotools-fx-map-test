@@ -29,6 +29,7 @@ import org.geotools.referencing.CRS;
 import org.opengis.referencing.crs.CoordinateReferenceSystem;
 import org.opengis.referencing.FactoryException;
 
+import java.awt.geom.Point2D;
 import java.io.IOException;
 import java.net.URL;
 import java.util.ArrayList;
@@ -134,12 +135,32 @@ public class View {
             }
         });
 
+        TextField xField = new TextField("lon");
+        TextField yField = new TextField("lat");
+        Button marker = new Button("Draw Marker");
+        marker.setOnAction(new EventHandler<ActionEvent>(){
+            @Override
+            public void handle(ActionEvent e){
+                try{
+                    Point2D.Double p = map.transformWorldToScreen(
+                        new Point2D.Double(
+                            Double.parseDouble(xField.getText()),
+                            Double.parseDouble(yField.getText())));
+                    map.drawMarker(p.getX(), p.getY());
+                } catch (Exception ex) { System.out.println(ex);}
+            }
+        });
+
         vbox.getChildren().add(hbox);
         vbox.getChildren().add(map);
         hbox.getChildren().add(reset);
         hbox.getChildren().add(epsgField);
         hbox.getChildren().add(changeCrs);
         hbox.getChildren().add(resize);
+        hbox.getChildren().add(xField);
+        hbox.getChildren().add(yField);
+        hbox.getChildren().add(marker);
+
         this.borderPane.setTop(this.menuBar);
         this.borderPane.setCenter(vbox);
         this.borderPane.setBottom(this.statusBar);

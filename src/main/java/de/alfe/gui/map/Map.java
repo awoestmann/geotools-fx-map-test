@@ -383,7 +383,7 @@ public class Map extends Parent {
      */
     public void setExtent(ReferencedEnvelope newExtent){
         this.mapContent.getViewport().setBounds(newExtent);
-        refreshViewport();
+        //refreshViewport();
         repaint();
 
     }
@@ -414,7 +414,7 @@ public class Map extends Parent {
         //this.layerBBox = this.displayLayer.getEnvelope(crs);
         //this.maxBBox = this.layerBBox;
         this.crs = crs;
-        refreshViewport();
+        //refreshViewport();
         repaint();
     }
 
@@ -423,12 +423,11 @@ public class Map extends Parent {
      * @param screenPoint Point in screen coordinates
      * @return Transformed point
      */
-	private Point2D.Double transformScreenToWorld(Point2D.Double screenPoint) {
+	public Point2D.Double transformScreenToWorld(Point2D.Double screenPoint) {
 		Point2D.Double worldPoint = new Point2D.Double();
-        worldPoint = screenPoint;
 		//AffineTransform.getRotateInstance(java.lang.Math.PI, dimensionX/2, dimensionY/2)
-		//	.transform(screenPoint, worldPoint);
-		screenToWorld.transform(worldPoint, worldPoint);
+			//.transform(screenPoint, worldPoint);
+		this.mapContent.getViewport().getScreenToWorld().transform(screenPoint, worldPoint);
 		return worldPoint;
 	}
 
@@ -437,9 +436,9 @@ public class Map extends Parent {
      * @param worldPoint Point in world coordinates
      * @return Transformed point
      */
-	private Point2D.Double transformWorldToScreen(Point2D.Double worldPoint) {
+	public Point2D.Double transformWorldToScreen(Point2D.Double worldPoint) {
 		Point2D.Double screenPoint = new Point2D.Double();
-		worldToScreen.transform(worldPoint, screenPoint);
+		this.mapContent.getViewport().getWorldToScreen().transform(worldPoint, screenPoint);
 		//AffineTransform.getRotateInstance(java.lang.Math.PI, dimensionX/2, dimensionY/2)
 			//.transform(screenPoint, screenPoint);
 		return screenPoint;
@@ -550,7 +549,7 @@ public class Map extends Parent {
      * @param xPosition Marker x coordinate in screen coordinates
      * @param yPosition Marker y coordinate in screen coordinates
      */
-    private void drawMarker(double xPosition, double yPosition) {
+    public void drawMarker(double xPosition, double yPosition) {
         double markerSpan = this.mapCanvas.getWidth() / HUNDRED;
         double upperLeftX = xPosition - markerSpan;
         double upperLeftY = yPosition + markerSpan;
@@ -627,8 +626,6 @@ public class Map extends Parent {
                     lastMouseXPos = mouseXPosOnClick;
                     lastMouseYPos = mouseYPosOnClick;
                     mouseYPosOnClick = e.getY();
-					Point2D clickWorld = transformScreenToWorld(new Point2D.Double(e.getY(), e.getX()));
-                    System.out.println("Clicked: " + e.getX() + " - " + e.getY() + " ; " + clickWorld);
                 }
             }
             if (e.getButton().equals(MouseButton.SECONDARY)) {
@@ -656,6 +653,8 @@ public class Map extends Parent {
                     && e.getY() > (mouseYPosOnClick - DRAGGING_OFFSET)) {
                 drawMarker(mouseXPosOnClick, mouseYPosOnClick);
                 markerCount++;
+                Point2D clickWorld = transformScreenToWorld(new Point2D.Double(e.getX(), e.getY()));
+                System.out.println("Clicked: " + e.getX() + " - " + e.getY() + " ; " + clickWorld);
                 if (markerCount == 2) {
                     if (mouseXPosOnClick > previousMouseXPosOnClick) {
                         drawBox(mouseXPosOnClick, mouseYPosOnClick,
