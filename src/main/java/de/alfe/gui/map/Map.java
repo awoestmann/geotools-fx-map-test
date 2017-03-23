@@ -38,6 +38,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.Timer;
 import java.util.TimerTask;
+import javafx.application.Platform;
 import javafx.collections.ObservableList;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
@@ -117,6 +118,7 @@ import org.jfree.fx.FXGraphics2D;
 import java.awt.Rectangle;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Point2D;
+
 /**
  * This class is going to Manage the Display of a Map based on a WFS Service.
  * It should have some widgets to zoom and to draw a Bounding Box.
@@ -237,8 +239,10 @@ public class Map extends Parent {
      * @param layer Layer containing map
      * @param dimensionX Map width
      * @param dimensionY map height
+     * @param bounds Bounding box
      */
-    public Map(WebMapServer wms, Layer layer, int dimensionX, int dimensionY){
+    public Map(WebMapServer wms, Layer layer, int dimensionX, int dimensionY, org.opengis.geometry.Envelope bounds){
+            System.setProperty("org.geotools.referencing.forceXY", "true");
             mapCanvas = new Canvas(dimensionX, dimensionY);
             gc = mapCanvas.getGraphicsContext2D();
             zoomLevel = 0;
@@ -254,10 +258,12 @@ public class Map extends Parent {
                 System.out.println("Factory Exception");
             }
             System.out.println("Layer bounds: " + layerBounds);
-            this.layerBBox = layerBounds;
-            this.maxBBox = layerBounds;
+            //this.layerBBox = new GeneralEnvelope(new ReferencedEnvelope(-85, 85, -175, 175, this.crs));
+			//this.layerBBox = new GeneralEnvelope(new ReferencedEnvelope(-22, 50, 31, 67, this.crs));
+            this.layerBBox = new GeneralEnvelope(bounds);
+            this.layerBBox.setCoordinateReferenceSystem(this.crs);
+            this.maxBBox = layerBBox;
 
-			this.layerBBox = new GeneralEnvelope(new ReferencedEnvelope(31, 67, -22, 50, this.crs));
 
             this.updateImageButton = new Button("Reset");
             Button resizeButton = new Button("resize");
@@ -271,11 +277,11 @@ public class Map extends Parent {
             layers = new ArrayList<Layer>(0);
             layers.add(layer);
 
+            WMSLayer wmsLayer = new WMSLayer(wms, displayLayer);
             this.mapContent = new MapContent();
-            this.mapContent.addLayer(new WMSLayer(wms, displayLayer));
+            this.mapContent.addLayer(wmsLayer);
             this.mapContent.getViewport().setCoordinateReferenceSystem(crs);
-            this.mapContent.getViewport().setBounds(new ReferencedEnvelope(31, 67, -22, 50, this.crs));
-            //this.mapContent.getViewport.setBounds(new ReferencedEnvelope(layerBBox));
+            this.mapContent.getViewport().setBounds(new ReferencedEnvelope(layerBBox));
 
             updateImageButton.setOnAction(new EventHandler<ActionEvent>(){
                 @Override
@@ -290,7 +296,6 @@ public class Map extends Parent {
                     resize(1200, 800);
                 }
             });
-
 
             this.epsgField = new TextField(this.INIT_SPACIAL_REF_SYS);
             hBox.getChildren().add(updateImageButton);
@@ -312,15 +317,26 @@ public class Map extends Parent {
                 OnMouseScrollEvent());
 
             zoomTimer = new Timer(true);
-            refreshViewport();
             repaint();
+            refreshViewport();
+            System.out.println(wmsLayer.getLastGetMap().getFinalURL());
     }
 
     /**
-      * Resize map
-      * @param width New width
-      * @param height New height
-      */
+     * Clears all drawn shapes
+     */
+    public void clearShapes() {
+        ArrayList<Object> list = new ArrayList<Object>(1);
+        list.add(this.vBox);
+        this.getChildren().retainAll(list);
+        markerCount = 0;
+    }
+
+    /**
+     * Resize map
+     * @param width New width
+     * @param height New height
+     */
     public void resize(double width, double height){
         this.mapCanvas.setWidth(width);
         this.mapCanvas.setHeight(height);
@@ -330,8 +346,8 @@ public class Map extends Parent {
     }
 
     /**
-      * Repaint the map using Geotools StreamingRenderer and MapContent
-      */
+     * Repaint the map using Geotools StreamingRenderer and MapContent
+     */
     public void repaint() {
         renderer = new StreamingRenderer();
         renderer.setMapContent(mapContent);
@@ -340,11 +356,14 @@ public class Map extends Parent {
         gc.clearRect(0, 0, dimensionX, dimensionY);
         Rectangle rectangle = new Rectangle(dimensionX, dimensionY);
         renderer.paint(graphics, rectangle, mapContent.getViewport().getBounds());
+        Platform.runLater(() -> {
+            clearShapes();
+        });
     }
 
     /**
-      * Recalculate screen-to-world and world-to-screen transformations
-      */
+     * Recalculate screen-to-world and world-to-screen transformations
+     */
     private void refreshViewport(){
         this.mapContent.getViewport().setScreenArea(new Rectangle(dimensionX, dimensionY));
         screenToWorld = mapContent.getViewport().getScreenToWorld();
@@ -352,16 +371,16 @@ public class Map extends Parent {
     }
 
     /**
-      * Reset extent to initial value
-      */
+     * Reset extent to initial value
+     */
     public void resetExtent(){
         setExtent(new ReferencedEnvelope(this.layerBBox));
     }
 
     /**
-      * Set Extent
-      * @param newExtent the new Extent
-      */
+     * Set Extent
+     * @param newExtent the new Extent
+     */
     public void setExtent(ReferencedEnvelope newExtent){
         this.mapContent.getViewport().setBounds(newExtent);
         refreshViewport();
@@ -370,9 +389,9 @@ public class Map extends Parent {
     }
 
     /**
-      * Adds a layer to the map and repaints
-      * @param layer The new layer
-      */
+     * Adds a layer to the map and repaints
+     * @param layer The new layer
+     */
     public void addLayer(org.geotools.map.Layer layer){
         if(layer != null){
             this.mapContent.addLayer(layer);
@@ -381,32 +400,43 @@ public class Map extends Parent {
     }
 
     /**
-      * Set the used coordinate reference system
-      * @param crs The new crs
-      */
+     * Set the used coordinate reference system
+     * @param crs The new crs
+     */
     public void setMapCRS(CoordinateReferenceSystem crs){
         this.mapContent.getViewport().setCoordinateReferenceSystem(crs);
-        this.crs = crs;
-        this.layerBBox.setCoordinateReferenceSystem(crs);
+        try{
+            this.maxBBox = new GeneralEnvelope(new ReferencedEnvelope(maxBBox).transform(crs, true));
+            this.layerBBox = new GeneralEnvelope(new ReferencedEnvelope(layerBBox).transform(crs, true));
+        } catch (Exception tEx) {
+            System.out.println(tEx);
+        }
         //this.layerBBox = this.displayLayer.getEnvelope(crs);
-        this.maxBBox = this.layerBBox;
+        //this.maxBBox = this.layerBBox;
+        this.crs = crs;
         refreshViewport();
         repaint();
     }
 
     /**
-      * Transform a point from screen to world coordinates
-      * @param screenPoint Point in screen coordinates
-      * @return transformed point
-      */
+     * Transform a point from screen to world coordinates.
+     * @param screenPoint Point in screen coordinates
+     * @return Transformed point
+     */
 	private Point2D.Double transformScreenToWorld(Point2D.Double screenPoint) {
 		Point2D.Double worldPoint = new Point2D.Double();
-		AffineTransform.getRotateInstance(java.lang.Math.PI, dimensionX/2, dimensionY/2)
-			.transform(screenPoint, worldPoint);
+        worldPoint = screenPoint;
+		//AffineTransform.getRotateInstance(java.lang.Math.PI, dimensionX/2, dimensionY/2)
+		//	.transform(screenPoint, worldPoint);
 		screenToWorld.transform(worldPoint, worldPoint);
 		return worldPoint;
 	}
-	
+
+    /**
+     * Transform a point from world to screen coordinates.
+     * @param worldPoint Point in world coordinates
+     * @return Transformed point
+     */
 	private Point2D.Double transformWorldToScreen(Point2D.Double worldPoint) {
 		Point2D.Double screenPoint = new Point2D.Double();
 		worldToScreen.transform(worldPoint, screenPoint);
@@ -415,6 +445,13 @@ public class Map extends Parent {
 		return screenPoint;
 	}
 
+    /**
+     * Zooms in/out.
+     * TODO: center zoom on mouse position
+     * @param zoomDelta 
+     * @param x Mouse position x
+     * @param y Mouse position y
+     */
     private void zoom(int zoomDelta, double x, double y) {
         if(zoomDelta == 0) {
             return;
@@ -438,18 +475,21 @@ public class Map extends Parent {
             upper = new Point2D.Double((dimensionX / 2) + (0.5 * dimensionX * newZoom),
                     (dimensionY / 2) + (0.5  * dimensionY * newZoom));
         }
-        System.out.println(lower + " - " + upper);
         lower = transformScreenToWorld(lower);
         upper = transformScreenToWorld(upper);
-        System.out.println(lower + " - " + upper);
         newBounds = new ReferencedEnvelope(lower.getX(), upper.getX(), lower.getY(), upper.getY(), this.crs);
-        System.out.println(newBounds);
 
         setExtent(newBounds);
     }
 
+    /**
+     * Drags the map.
+     * @param fromXScreen Original x coordinate in screen coordinates
+     * @param fromYScreen Original y coordinate in screen coordinates
+     * @param toXScreen Target x coordinate in screen coordinates
+     * @param toYScreen Target y coordinate in screen coordinates
+     */
     private void drag(double fromXScreen, double fromYScreen, double toXScreen, double toYScreen) {
-        System.out.println("Dragging Image...");
         Point2D.Double from = new Point2D.Double(fromYScreen, fromXScreen);
         Point2D.Double to = new Point2D.Double(toYScreen, toXScreen);
 		
@@ -466,17 +506,16 @@ public class Map extends Parent {
         ReferencedEnvelope bBox = this.mapContent.getViewport().getBounds();
 
          ReferencedEnvelope newBounds = new ReferencedEnvelope(
-            bBox.getMinX() - xOffset,
-            bBox.getMaxX() - xOffset,
-            bBox.getMinY() - yOffset,
-            bBox.getMaxY() - yOffset,
+            bBox.getMinX() + yOffset,
+            bBox.getMaxX() + yOffset,
+            bBox.getMinY() + xOffset,
+            bBox.getMaxY() + xOffset,
             this.crs);
-        System.out.println("Bounds after drag: " + newBounds);
 
         //TODO: Prevent exceeding max coordinate bounds
         if(!maxBBox.contains(newBounds, true)){
-            System.out.println("Out of bounds");
-            System.out.println(newBounds + " - " + maxBBox);
+            System.out.println("Dragging out of bounds");
+            System.out.println(newBounds + " > " + maxBBox);
             /*
             double lowerX = newBounds.getLowerCorner().getOrdinate(0);
             double lowerY = newBounds.getLowerCorner().getOrdinate(1);
@@ -506,6 +545,11 @@ public class Map extends Parent {
         setExtent(newBounds);
     }
 
+    /**
+     * Draws a marker on a speficic position.
+     * @param xPosition Marker x coordinate in screen coordinates
+     * @param yPosition Marker y coordinate in screen coordinates
+     */
     private void drawMarker(double xPosition, double yPosition) {
         double markerSpan = this.mapCanvas.getWidth() / HUNDRED;
         double upperLeftX = xPosition - markerSpan;
@@ -532,6 +576,13 @@ public class Map extends Parent {
         this.getChildren().add(upperRightToLowerLeft);
     }
 
+    /**
+     * Draws a box, defined by two corners.
+     * @param beginX First corner x coordinate in screen coordinates
+     * @param beginY First corner y coordinate in screen coordinates
+     * @param endX Second corner x coordinate in screen coordinates
+     * @param endY Second corner y coordinate in screen coordinates
+     */
     private void drawBox(double beginX, double beginY, double endX, double
             endY) {
         Line upperLine = new Line(beginX, beginY, endX, beginY);
@@ -577,7 +628,7 @@ public class Map extends Parent {
                     lastMouseYPos = mouseYPosOnClick;
                     mouseYPosOnClick = e.getY();
 					Point2D clickWorld = transformScreenToWorld(new Point2D.Double(e.getY(), e.getX()));
-					System.out.println("Clicked: S - W " + e.getX() + "," + e.getY() + " - " + clickWorld);
+                    System.out.println("Clicked: " + e.getX() + " - " + e.getY() + " ; " + clickWorld);
                 }
             }
             if (e.getButton().equals(MouseButton.SECONDARY)) {
@@ -603,11 +654,9 @@ public class Map extends Parent {
                     && e.getX() > (mouseXPosOnClick - DRAGGING_OFFSET)
                     && e.getY() < (mouseYPosOnClick + DRAGGING_OFFSET)
                     && e.getY() > (mouseYPosOnClick - DRAGGING_OFFSET)) {
-                System.out.println("Maker Set");
                 drawMarker(mouseXPosOnClick, mouseYPosOnClick);
                 markerCount++;
                 if (markerCount == 2) {
-                    //TODO: Bounding Box
                     if (mouseXPosOnClick > previousMouseXPosOnClick) {
                         drawBox(mouseXPosOnClick, mouseYPosOnClick,
                                 previousMouseXPosOnClick,
@@ -617,16 +666,13 @@ public class Map extends Parent {
                                 previousMouseYPosOnClick, mouseXPosOnClick,
                                 mouseYPosOnClick);
                     }
-                    System.out.println("Draw Bounding-Box");
                 } else if (markerCount > 2) {
-                    boxGroup.getChildren().clear();
                     markerCount = 0;
                 }
                 previousMouseXPosOnClick = mouseXPosOnClick;
                 previousMouseYPosOnClick = mouseYPosOnClick;
             } else {
                 drag(mouseXPosOnClick, mouseYPosOnClick, e.getX(), e.getY());
-                boxGroup.getChildren().clear();
                 markerCount = 0;
             }
         }
@@ -650,7 +696,6 @@ public class Map extends Parent {
             zoomTimer = new Timer(true);
             zoomTask = new TimerTask() {
                 public void run() {
-                    System.out.println("Zoom from to: " + lastZoomLevel + " - " + zoomLevel);
                     int zoomDelta = zoomLevel - lastZoomLevel;
                     //if(zoomDelta >= 0) {
                       //    zoomIn(zoomDelta, 0,0);
@@ -697,6 +742,10 @@ public class Map extends Parent {
     }
     */
 
+    /**
+     * Draws WKT formated polygons.
+     * @param wktPolygonList WKT formated Polygons
+     */
     public void drawStringPolygons(List<String> wktPolygonList) throws
               ParseException, FactoryException, SchemaException {
           WKTReader reader = new WKTReader(new GeometryFactory());
@@ -758,8 +807,7 @@ public class Map extends Parent {
       }
 
     /**
-     * Draws Polygons on the maps.
-     *
+     * Draws Polygons on the map.
      * @param featurePolygons List of drawable Polygons
      */
     public void drawPolygons(List<FeaturePolygon> featurePolygons) {
@@ -822,6 +870,9 @@ public class Map extends Parent {
         }
     }
 
+    /**
+     * Creates the polygon style
+     */
     private Style createPolygonStyle() {
         Fill fill = sf.createFill(ff.literal(FILL_COLOR),
                 ff.literal(FILL_TRANSPARACY));

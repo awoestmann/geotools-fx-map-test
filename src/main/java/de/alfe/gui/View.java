@@ -24,6 +24,7 @@ import org.geotools.data.ows.Layer;
 import org.geotools.data.wms.WebMapServer;
 import org.geotools.feature.SchemaException;
 import org.geotools.ows.ServiceException;
+import org.geotools.geometry.GeneralEnvelope;
 import org.geotools.referencing.CRS;
 import org.opengis.referencing.crs.CoordinateReferenceSystem;
 import org.opengis.referencing.FactoryException;
@@ -72,7 +73,8 @@ public class View {
                 break;
             }
         }
-        this.map = new Map(wms, displayLayer, 1024, 768);
+        
+        this.map = new Map(wms, displayLayer, 1024, 768, new GeneralEnvelope(new double[]{-22, 31}, new double[]{50, 67}));
         this.map.setMapCRS(CRS.decode(Map.getEPSGWGS84String()));
 
         this.menuBar = new MenuBar();
