@@ -51,6 +51,7 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.canvas.Canvas;
@@ -58,10 +59,12 @@ import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.MouseButton;
+import javafx.scene.input.MouseDragEvent;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Pane;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
@@ -196,6 +199,7 @@ public class Map extends Parent {
     private MapContent mapContent;
     private GraphicsContext gc;
     private Canvas mapCanvas;
+    private ScrollPane mapPane;
     private StreamingRenderer renderer;
     private FXGraphics2D graphics;
 
@@ -303,7 +307,14 @@ public class Map extends Parent {
             hBox.getChildren().add(resizeButton);
 
             this.getChildren().add(vBox);
-            this.vBox.getChildren().add(mapCanvas);
+            mapPane = new ScrollPane();
+            mapPane.setMaxSize(dimensionX, dimensionY);
+            mapPane.setPrefSize(dimensionX, dimensionY);
+            mapPane.setContent(mapCanvas);
+            mapPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+            mapPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+
+            this.vBox.getChildren().add(mapPane);
 
             this.mapCanvas.addEventHandler(MouseEvent.MOUSE_RELEASED, new
                 OnMouseReleasedEvent());
@@ -489,6 +500,9 @@ public class Map extends Parent {
      * @param toYScreen Target y coordinate in screen coordinates
      */
     private void drag(double fromXScreen, double fromYScreen, double toXScreen, double toYScreen) {
+        System.out.println("Do drag");
+        mapCanvas.setTranslateX(0);
+        mapCanvas.setTranslateY(0);
         Point2D.Double from = new Point2D.Double(fromYScreen, fromXScreen);
         Point2D.Double to = new Point2D.Double(toYScreen, toXScreen);
 		
@@ -504,13 +518,19 @@ public class Map extends Parent {
         double yOffset = (toY - fromY);// * ZOOM_FACTOR;
         ReferencedEnvelope bBox = this.mapContent.getViewport().getBounds();
 
-         ReferencedEnvelope newBounds = new ReferencedEnvelope(
-            bBox.getMinX() + yOffset,
-            bBox.getMaxX() + yOffset,
-            bBox.getMinY() + xOffset,
-            bBox.getMaxY() + xOffset,
-            this.crs);
+        //ReferencedEnvelope newBounds = new ReferencedEnvelope(
+        //    bBox.getMinX() + yOffset,
+        //    bBox.getMaxX() + yOffset,
+        //    bBox.getMinY() + xOffset,
+        //    bBox.getMaxY() + xOffset,
+        //    this.crs);
 
+        Point2D.Double minXY = transformScreenToWorld(new Point2D.Double(0 - toXScreen, 0 - toYScreen));
+        Point2D.Double maxXY = transformScreenToWorld(new Point2D.Double(dimensionX - toXScreen, dimensionY - toYScreen));
+
+        ReferencedEnvelope newBounds = new ReferencedEnvelope(
+            minXY.getX(), maxXY.getX(),
+            minXY.getY(), maxXY.getY(), this.crs);
         //TODO: Prevent exceeding max coordinate bounds
         if(!maxBBox.contains(newBounds, true)){
             System.out.println("Dragging out of bounds");
@@ -622,10 +642,10 @@ public class Map extends Parent {
                     zoom(10, 0,0);
                 }
                 if (e.getClickCount() == 1) {
-                    mouseXPosOnClick = e.getX();
+                    mouseXPosOnClick = e.getSceneX();
+                    mouseYPosOnClick = e.getSceneY();
                     lastMouseXPos = mouseXPosOnClick;
                     lastMouseYPos = mouseYPosOnClick;
-                    mouseYPosOnClick = e.getY();
                 }
             }
             if (e.getButton().equals(MouseButton.SECONDARY)) {
@@ -637,6 +657,9 @@ public class Map extends Parent {
                     boxGroup.getChildren().clear();
                 }
             }
+            Point2D clickWorld = transformScreenToWorld(new Point2D.Double(e.getSceneX(), e.getSceneY()));
+            System.out.println("Clicked: " + e.getSceneX() + " - " + e.getSceneY() + " ; " + clickWorld);
+
         }
     }
 
@@ -653,9 +676,7 @@ public class Map extends Parent {
                     && e.getY() > (mouseYPosOnClick - DRAGGING_OFFSET)) {
                 drawMarker(mouseXPosOnClick, mouseYPosOnClick);
                 markerCount++;
-                Point2D clickWorld = transformScreenToWorld(new Point2D.Double(e.getX(), e.getY()));
-                System.out.println("Clicked: " + e.getX() + " - " + e.getY() + " ; " + clickWorld);
-                if (markerCount == 2) {
+                                if (markerCount == 2) {
                     if (mouseXPosOnClick > previousMouseXPosOnClick) {
                         drawBox(mouseXPosOnClick, mouseYPosOnClick,
                                 previousMouseXPosOnClick,
@@ -671,7 +692,8 @@ public class Map extends Parent {
                 previousMouseXPosOnClick = mouseXPosOnClick;
                 previousMouseYPosOnClick = mouseYPosOnClick;
             } else {
-                drag(mouseXPosOnClick, mouseYPosOnClick, e.getX(), e.getY());
+                //drag(mouseXPosOnClick, mouseYPosOnClick, e.getX(), e.getY());
+                drag(0, 0, mapCanvas.getTranslateX(), mapCanvas.getTranslateY());
                 markerCount = 0;
             }
         }
@@ -715,13 +737,15 @@ public class Map extends Parent {
             implements EventHandler<MouseEvent> {
         @Override
         public void handle(MouseEvent e){
-            double xOffset = e.getX() - lastMouseXPos;
-            double yOffset = e.getY() - lastMouseYPos;
-            lastMouseXPos += xOffset;
-            lastMouseYPos += yOffset;
-            //TODO: Translate image
+            double xOffset = lastMouseXPos - e.getSceneX();
+            double yOffset = lastMouseYPos - e.getSceneY();
+            lastMouseXPos = e.getSceneX();
+            lastMouseYPos = e.getSceneY();
+            mapCanvas.setTranslateX(mapCanvas.getTranslateX() + (-1 * xOffset));
+            mapCanvas.setTranslateY(mapCanvas.getTranslateY() + (-1 * yOffset));
         }
     }
+
     //Does not work, because the map itself aint an Input-Field
     /*
     private class OnPressedPlusOrMinusEvent
