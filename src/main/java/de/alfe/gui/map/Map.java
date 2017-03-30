@@ -177,7 +177,7 @@ public class Map extends Parent {
     private int lastZoomLevel;
     private Timer zoomTimer;
     private TimerTask zoomTask;
-    private final int ZOOM_TIMEOUT = 150;
+    private final int ZOOM_TIMEOUT = 1500;
     private final int MAX_ZOOM_LEVEL = 100;
     private final double ZOOM_FACTOR = 1.5;
 
@@ -394,6 +394,8 @@ public class Map extends Parent {
                     (dimensionY / 2) + (0.5  * dimensionY * newZoom));
         }
         //TODO: scale
+        //mapCanvas.setScaleX(mapCanvas.getScaleX() * 1.1);
+        //mapCanvas.setScaleY(mapCanvas.getScaleY() * 1.1);
     }
 
     /**
